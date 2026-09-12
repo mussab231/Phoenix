@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure Phoenix",
+            "type": "shell",
+            "command": "cmake -S \"${workspaceFolder}\" -B \"${workspaceFolder}/build\" -G Ninja -DCMAKE_BUILD_TYPE=Release \"-DCMAKE_PREFIX_PATH=C:/msys64/mingw64\"",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Phoenix",
+            "type": "shell",
+            "command": "cmake --build \"${workspaceFolder}/build\"",
+            "group": { "kind": "build", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": "$gcc"
+        }
+    ]
+}

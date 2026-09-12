@@ -1,0 +1,38 @@
+# Build output
+build/
+cmake-build-*/
+
+# Compiled objects / binaries (outside build/)
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.ilk
+
+# Qt generated
+*_autogen/
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+Makefile*
+
+# MSVC / Visual Studio
+.vs/
+*.user
+*.suo
+*.sln.docstates
+
+# Phoenix test artifacts (self-tests write to %TEMP%, but stay safe)
+*.phoenix-state
+phoenix_selftest*
+phoenix_reference*
+phoenix_resume*
+
+# OS junk
+Thumbs.db
+.DS_Store
+Desktop.ini
