@@ -4,21 +4,22 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 Goal: match — then surpass — Internet Download Manager.
 
 > 🇸🇾 **بالعربي:** برنامج تحميل سريع لويندوز، بيقسّم الملف لعدة مقاطع وبيحمّلها بالتوازي،
-> وبيدعم الاستكمال بعد الإيقاف أو انقطاع النت. مكتوب بلغة C++ ومبني على WinHTTP وQt6.
+> وبيدعم الاستكمال بعد الإيقاف أو انقطاع النت، مع قائمة تحميلات متعددة. مكتوب بلغة C++ ومبني على WinHTTP وQt6.
 
 ---
 
-## ✨ Features (v0.3)
+## ✨ Features (v0.4)
 
 | Feature | Status |
 |---------|--------|
 | Parallel segmented downloads (1–16 connections) | ✅ |
 | Automatic resume after pause / crash / network loss (`.phoenix-state`) | ✅ |
+| Download queue: several files at once, configurable concurrency (1–5) | ✅ |
+| Per-download pause / resume / remove, live speed per item | ✅ |
 | Smart fallback to single connection when server ignores `Range` | ✅ |
-| Qt GUI: progress bar, live speed, connection count | ✅ |
+| Qt GUI: queue table, per-row progress, Add dialog | ✅ |
 | Byte-for-byte verified downloads (segmented == single-connection) | ✅ |
-| Headless self-tests (`--self-test`, `--self-test-mt`, `--self-test-resume`) | ✅ |
-| Download queue (multiple files) | 🔜 v0.4 |
+| Headless self-tests (`--self-test`, `--self-test-mt`, `--self-test-resume`, `--self-test-queue`) | ✅ |
 | Scheduler + auto-shutdown on completion | 🔜 v0.5 |
 | Speed limiter + smart retry | 🔜 v0.6 |
 | Browser integration (link catching) | 🔜 v0.7 |
@@ -42,10 +43,11 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 ## ▶️ Run
 
 ```powershell
-.\build\Phoenix.exe                  # GUI
+.\build\Phoenix.exe                    # GUI (queue table)
 .\build\Phoenix.exe --self-test        # quick HEAD + GET smoke test
 .\build\Phoenix.exe --self-test-mt     # 10 MB over 8 connections + content check
 .\build\Phoenix.exe --self-test-resume # forced cancel at ~2 MB, then resume
+.\build\Phoenix.exe --self-test-queue  # two downloads at once through the queue
 ```
 
 ## 🗂️ Project layout
@@ -58,11 +60,14 @@ Phoenix/
 │   ├── core/
 │   │   ├── HttpClient.*      # WinHTTP wrapper (size probe, GET, Range, segments)
 │   │   ├── ResumeStore.*     # .phoenix-state persistence (pause/crash recovery)
-│   │   └── DownloadEngine.*  # worker thread + Qt signals
+│   │   ├── DownloadEngine.*  # one download on a worker thread + Qt signals
+│   │   └── DownloadQueue.*   # coordinates several engines (concurrency limit)
 │   ├── models/
-│   │   └── DownloadTask.h
+│   │   ├── DownloadTask.h
+│   │   └── DownloadItem.h    # one queue entry
 │   └── gui/
-│       └── MainWindow.*      # Qt Widgets interface
+│       ├── MainWindow.*      # queue table + controls
+│       └── AddDialog.*       # new-download dialog
 └── .vscode/                  # build / run / debug tasks
 ```
 

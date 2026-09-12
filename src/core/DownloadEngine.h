@@ -18,6 +18,7 @@ public:
     void start(const std::string& url, const std::string& outputPath,
                int segments = 8);
     void cancel();
+    void wait(); // blocks until the worker thread ends (also done by dtor)
 
 signals:
     void progressChanged(qint64 received, qint64 total);

@@ -1,9 +1,13 @@
+#include "core/DownloadQueue.h"
 #include "core/HttpClient.h"
 #include "gui/MainWindow.h"
+#include "models/DownloadItem.h"
 
 #include <windows.h>
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QTimer>
 
 #include <atomic>
 #include <cstdio>
@@ -203,6 +207,74 @@ int runResumeTest() {
     return 0;
 }
 
+// Queue test: two downloads at once through DownloadQueue, verified on disk.
+int runQueueTest() {
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    const std::string smallUrl = "https://example.com/";
+    const std::string bigUrl = "https://cachefly.cachefly.net/10mb.test";
+    const std::int64_t bigExpected = 10LL * 1024 * 1024;
+    const std::string smallOut = tempFile("phoenix_q1.html");
+    const std::string bigOut = tempFile("phoenix_q2.bin");
+    std::remove(smallOut.c_str());
+    std::remove(bigOut.c_str());
+    std::remove((bigOut + ".phoenix-state").c_str());
+
+    DownloadQueue queue;
+    queue.setMaxConcurrent(2);
+    bool timedOut = false;
+    QObject::connect(&queue, &DownloadQueue::queueFinished, &app,
+                     &QCoreApplication::quit);
+    QObject::connect(&queue, &DownloadQueue::itemChanged, [&](int id) {
+        for (const auto& it : queue.items()) {
+            if (it.id == id) {
+                std::printf("\rQUEUE #%d %lld/%lld %s   ", id,
+                            static_cast<long long>(it.receivedBytes),
+                            static_cast<long long>(it.totalBytes), it.statusText.c_str());
+                break;
+            }
+        }
+    });
+    QTimer::singleShot(180000, &app, [&] {
+        timedOut = true;
+        QCoreApplication::quit();
+    });
+
+    int id1 = queue.addDownload(smallUrl, smallOut, 1);
+    int id2 = queue.addDownload(bigUrl, bigOut, 8);
+    std::printf("Queued #%d (small) and #%d (10 MB), max 2 at once.\n", id1, id2);
+    app.exec();
+    std::printf("\n");
+
+    if (timedOut) {
+        std::printf("QUEUE-TEST FAILED: timed out\n");
+        return 1;
+    }
+    std::int64_t smallSize = diskSize(smallOut);
+    std::int64_t bigSize = diskSize(bigOut);
+    std::printf("Small: %lld bytes, big: %lld (expected %lld)\n",
+                static_cast<long long>(smallSize), static_cast<long long>(bigSize),
+                static_cast<long long>(bigExpected));
+    if (smallSize <= 0 || bigSize != bigExpected) {
+        std::printf("QUEUE-TEST FAILED: bad output sizes\n");
+        return 1;
+    }
+    bool bothDone = true;
+    for (const auto& it : queue.items()) {
+        if (it.state != DownloadState::Completed)
+            bothDone = false;
+    }
+    if (!bothDone) {
+        std::printf("QUEUE-TEST FAILED: not all items Completed\n");
+        return 1;
+    }
+    std::printf("QUEUE-TEST OK\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -212,6 +284,8 @@ int main(int argc, char** argv) {
             return runMultiSegmentTest();
         if (arg == "--self-test-resume")
             return runResumeTest();
+        if (arg == "--self-test-queue")
+            return runQueueTest();
     }
     QApplication app(argc, argv);
     MainWindow w;

@@ -1,147 +1,177 @@
 #include "gui/MainWindow.h"
 
-#include "core/DownloadEngine.h"
+#include "core/DownloadQueue.h"
+#include "gui/AddDialog.h"
+#include "models/DownloadItem.h"
 
-#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
-#include <QLineEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
+namespace {
+constexpr int kColFile = 0;
+constexpr int kColSize = 1;
+constexpr int kColProgress = 2;
+constexpr int kColSpeed = 3;
+constexpr int kColStatus = 4;
+} // namespace
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.3"));
-    resize(560, 250);
+    setWindowTitle(QStringLiteral("Phoenix 0.4"));
+    resize(760, 420);
 
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
-    auto* urlRow = new QHBoxLayout();
-    urlRow->addWidget(new QLabel(QStringLiteral("URL:"), central));
-    m_urlEdit = new QLineEdit(central);
-    m_urlEdit->setPlaceholderText(QStringLiteral("https://example.com/file.zip"));
-    urlRow->addWidget(m_urlEdit);
-    layout->addLayout(urlRow);
+    auto* topRow = new QHBoxLayout();
+    m_addBtn = new QPushButton(QStringLiteral("Add..."), central);
+    m_pauseBtn = new QPushButton(QStringLiteral("Pause"), central);
+    m_resumeBtn = new QPushButton(QStringLiteral("Resume"), central);
+    m_removeBtn = new QPushButton(QStringLiteral("Remove"), central);
+    topRow->addWidget(m_addBtn);
+    topRow->addWidget(m_pauseBtn);
+    topRow->addWidget(m_resumeBtn);
+    topRow->addWidget(m_removeBtn);
+    topRow->addStretch(1);
+    topRow->addWidget(new QLabel(QStringLiteral("Max simultaneous:"), central));
+    m_maxBox = new QSpinBox(central);
+    m_maxBox->setRange(1, 5);
+    m_maxBox->setValue(3);
+    topRow->addWidget(m_maxBox);
+    layout->addLayout(topRow);
 
-    auto* pathRow = new QHBoxLayout();
-    pathRow->addWidget(new QLabel(QStringLiteral("Save to:"), central));
-    m_pathEdit = new QLineEdit(central);
-    pathRow->addWidget(m_pathEdit);
-    m_browseBtn = new QPushButton(QStringLiteral("Browse..."), central);
-    pathRow->addWidget(m_browseBtn);
-    layout->addLayout(pathRow);
-
-    auto* segRow = new QHBoxLayout();
-    segRow->addWidget(new QLabel(QStringLiteral("Connections:"), central));
-    m_segmentsBox = new QSpinBox(central);
-    m_segmentsBox->setRange(1, 16);
-    m_segmentsBox->setValue(8);
-    m_segmentsBox->setToolTip(QStringLiteral("Parallel connections (1 = classic single download)"));
-    segRow->addWidget(m_segmentsBox);
-    segRow->addStretch(1);
-    layout->addLayout(segRow);
-
-    auto* btnRow = new QHBoxLayout();
-    m_startBtn = new QPushButton(QStringLiteral("Download"), central);
-    m_cancelBtn = new QPushButton(QStringLiteral("Pause"), central);
-    m_cancelBtn->setEnabled(false);
-    btnRow->addWidget(m_startBtn);
-    btnRow->addWidget(m_cancelBtn);
-    layout->addLayout(btnRow);
-
-    m_bar = new QProgressBar(central);
-    m_bar->setRange(0, 100);
-    m_bar->setValue(0);
-    layout->addWidget(m_bar);
-
-    m_statusLabel = new QLabel(QStringLiteral("Idle"), central);
-    m_speedLabel = new QLabel(QString(), central);
-    layout->addWidget(m_statusLabel);
-    layout->addWidget(m_speedLabel);
+    m_table = new QTableWidget(0, 5, central);
+    m_table->setHorizontalHeaderLabels(
+        {QStringLiteral("File"), QStringLiteral("Size"), QStringLiteral("Progress"),
+         QStringLiteral("Speed"), QStringLiteral("Status")});
+    m_table->horizontalHeader()->setSectionResizeMode(kColFile, QHeaderView::Stretch);
+    m_table->setSelectionBehavior(QTableWidget::SelectRows);
+    m_table->setEditTriggers(QTableWidget::NoEditTriggers);
+    layout->addWidget(m_table);
 
     setCentralWidget(central);
 
-    m_engine = new DownloadEngine(this);
-    connect(m_startBtn, &QPushButton::clicked, this, &MainWindow::onStart);
-    connect(m_cancelBtn, &QPushButton::clicked, this, &MainWindow::onCancel);
-    connect(m_browseBtn, &QPushButton::clicked, this, &MainWindow::onBrowse);
-    connect(m_engine, &DownloadEngine::progressChanged, this, &MainWindow::onProgress);
-    connect(m_engine, &DownloadEngine::finished, this, &MainWindow::onFinished);
-    connect(m_engine, &DownloadEngine::errorOccurred, this, &MainWindow::onError);
-    connect(m_engine, &DownloadEngine::cancelled, this, &MainWindow::onCancelled);
-    connect(m_engine, &DownloadEngine::stateChanged, m_statusLabel,
-            &QLabel::setText);
+    m_queue = new DownloadQueue(this);
+    connect(m_addBtn, &QPushButton::clicked, this, &MainWindow::onAdd);
+    connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPause);
+    connect(m_resumeBtn, &QPushButton::clicked, this, &MainWindow::onResume);
+    connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
+    connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
+            &DownloadQueue::setMaxConcurrent);
+    connect(m_queue, &DownloadQueue::itemAdded, this, &MainWindow::onItemAdded);
+    connect(m_queue, &DownloadQueue::itemChanged, this, &MainWindow::onItemChanged);
+    connect(m_queue, &DownloadQueue::itemRemoved, this, &MainWindow::onItemRemoved);
 }
 
-void MainWindow::onStart() {
-    QString url = m_urlEdit->text().trimmed();
-    QString path = m_pathEdit->text().trimmed();
-    if (url.isEmpty() || path.isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("Enter a URL and an output file first."));
+void MainWindow::onAdd() {
+    AddDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted)
         return;
+    m_queue->addDownload(dlg.url().toStdString(), dlg.outputPath().toStdString(),
+                         dlg.segments());
+}
+
+void MainWindow::onPause() {
+    int id = selectedId();
+    if (id > 0)
+        m_queue->pauseDownload(id);
+}
+
+void MainWindow::onResume() {
+    int id = selectedId();
+    if (id > 0)
+        m_queue->resumeDownload(id);
+}
+
+void MainWindow::onRemove() {
+    int id = selectedId();
+    if (id > 0)
+        m_queue->removeDownload(id);
+}
+
+void MainWindow::onItemAdded(int id) {
+    int row = m_table->rowCount();
+    m_table->insertRow(row);
+    auto* name = new QTableWidgetItem();
+    name->setData(Qt::UserRole, id);
+    m_table->setItem(row, kColFile, name);
+    m_table->setItem(row, kColSize, new QTableWidgetItem());
+    m_table->setCellWidget(row, kColProgress, new QProgressBar(m_table));
+    m_table->setItem(row, kColSpeed, new QTableWidgetItem());
+    m_table->setItem(row, kColStatus, new QTableWidgetItem());
+    m_table->selectRow(row);
+    updateRow(id);
+}
+
+void MainWindow::onItemChanged(int id) {
+    updateRow(id);
+}
+
+void MainWindow::onItemRemoved(int id) {
+    int row = rowForId(id);
+    if (row >= 0)
+        m_table->removeRow(row);
+}
+
+int MainWindow::rowForId(int id) const {
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QTableWidgetItem* item = m_table->item(r, kColFile);
+        if (item && item->data(Qt::UserRole).toInt() == id)
+            return r;
     }
-    m_bar->setRange(0, 100);
-    m_bar->setValue(0);
-    m_speedLabel->clear();
-    m_lastBytes = 0;
-    m_speedTimer.start();
-    m_startBtn->setEnabled(false);
-    m_cancelBtn->setEnabled(true);
-    m_engine->start(url.toStdString(), path.toStdString(), m_segmentsBox->value());
+    return -1;
 }
 
-void MainWindow::onCancel() {
-    m_cancelBtn->setEnabled(false);
-    m_statusLabel->setText(QStringLiteral("Pausing..."));
-    m_engine->cancel();
+int MainWindow::selectedId() const {
+    auto sel = m_table->selectionModel()->selectedRows();
+    if (sel.isEmpty())
+        return -1;
+    QTableWidgetItem* item = m_table->item(sel.first().row(), kColFile);
+    return item ? item->data(Qt::UserRole).toInt() : -1;
 }
 
-void MainWindow::onBrowse() {
-    QString file = QFileDialog::getSaveFileName(this, QStringLiteral("Save as"));
-    if (!file.isEmpty())
-        m_pathEdit->setText(file);
-}
-
-void MainWindow::onProgress(qint64 received, qint64 total) {
-    if (total > 0)
-        m_bar->setValue(static_cast<int>(received * 100 / total));
-    else
-        m_bar->setRange(0, 0); // unknown size: busy indicator
-
-    qint64 elapsed = m_speedTimer.restart();
-    if (elapsed > 0) {
-        double speed = (received - m_lastBytes) * 1000.0 / elapsed;
-        m_speedLabel->setText(formatSize(received) +
-                              (total > 0 ? QStringLiteral(" / ") + formatSize(total)
-                                         : QString()) +
-                              QStringLiteral("  -  ") + formatSpeed(speed));
+void MainWindow::updateRow(int id) {
+    int row = rowForId(id);
+    if (row < 0)
+        return;
+    DownloadItem data;
+    bool found = false;
+    for (const auto& it : m_queue->items()) {
+        if (it.id == id) {
+            data = it;
+            found = true;
+            break;
+        }
     }
-    m_lastBytes = received;
-}
+    if (!found)
+        return;
 
-void MainWindow::onFinished(const QString& path) {
-    m_bar->setRange(0, 100);
-    m_bar->setValue(100);
-    m_statusLabel->setText(QStringLiteral("Saved to: ") + path);
-    m_startBtn->setEnabled(true);
-    m_cancelBtn->setEnabled(false);
-}
+    m_table->item(row, kColFile)
+        ->setText(baseName(QString::fromStdString(data.outputPath)));
+    m_table->item(row, kColSize)
+        ->setText(data.totalBytes > 0 ? formatSize(data.totalBytes) : QStringLiteral("?"));
 
-void MainWindow::onError(const QString& message) {
-    m_bar->setRange(0, 100);
-    m_statusLabel->setText(QStringLiteral("Error: ") + message);
-    m_startBtn->setEnabled(true);
-    m_cancelBtn->setEnabled(false);
-}
+    auto* bar = qobject_cast<QProgressBar*>(m_table->cellWidget(row, kColProgress));
+    if (bar) {
+        if (data.totalBytes > 0) {
+            bar->setRange(0, 100);
+            bar->setValue(static_cast<int>(data.receivedBytes * 100 / data.totalBytes));
+        } else {
+            bar->setRange(0, 0); // unknown size: busy indicator
+        }
+    }
 
-void MainWindow::onCancelled() {
-    m_bar->setRange(0, 100);
-    m_statusLabel->setText(QStringLiteral("Paused - press Download to resume"));
-    m_startBtn->setEnabled(true);
-    m_cancelBtn->setEnabled(false);
+    m_table->item(row, kColSpeed)
+        ->setText(data.speedBps > 0 ? formatSpeed(data.speedBps) : QString());
+    m_table->item(row, kColStatus)
+        ->setText(QString::fromStdString(data.statusText));
 }
 
 QString MainWindow::formatSize(qint64 bytes) {
@@ -158,4 +188,8 @@ QString MainWindow::formatSize(qint64 bytes) {
 
 QString MainWindow::formatSpeed(double bytesPerSec) {
     return formatSize(static_cast<qint64>(bytesPerSec)) + QStringLiteral("/s");
+}
+
+QString MainWindow::baseName(const QString& path) {
+    return QFileInfo(path).fileName();
 }

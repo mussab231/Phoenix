@@ -9,14 +9,12 @@ DownloadEngine::DownloadEngine(QObject* parent) : QObject(parent) {}
 
 DownloadEngine::~DownloadEngine() {
     m_stop = true;
-    if (m_worker.joinable())
-        m_worker.join();
+    wait();
 }
 
 void DownloadEngine::start(const std::string& url, const std::string& outputPath,
                            int segments) {
-    if (m_worker.joinable())
-        m_worker.join(); // previous run already finished (signals delivered)
+    wait(); // previous run already finished (signals delivered)
     m_stop = false;
     if (segments < 1)
         segments = 1;
@@ -32,6 +30,11 @@ void DownloadEngine::start(const std::string& url, const std::string& outputPath
 
 void DownloadEngine::cancel() {
     m_stop = true;
+}
+
+void DownloadEngine::wait() {
+    if (m_worker.joinable())
+        m_worker.join();
 }
 
 void DownloadEngine::run(DownloadTask task) {

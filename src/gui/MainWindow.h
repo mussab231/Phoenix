@@ -1,14 +1,12 @@
 #pragma once
 
-#include <QElapsedTimer>
 #include <QMainWindow>
 
-class QLabel;
-class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QSpinBox;
-class DownloadEngine;
+class QTableWidget;
+class DownloadQueue;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -16,29 +14,28 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
-    void onStart();
-    void onCancel();
-    void onBrowse();
-    void onProgress(qint64 received, qint64 total);
-    void onFinished(const QString& path);
-    void onError(const QString& message);
-    void onCancelled();
+    void onAdd();
+    void onPause();
+    void onResume();
+    void onRemove();
+    void onItemAdded(int id);
+    void onItemChanged(int id);
+    void onItemRemoved(int id);
 
 private:
+    int rowForId(int id) const;
+    int selectedId() const;
+    void updateRow(int id);
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
+    static QString baseName(const QString& path);
 
-    QLineEdit* m_urlEdit = nullptr;
-    QLineEdit* m_pathEdit = nullptr;
-    QSpinBox* m_segmentsBox = nullptr;
-    QPushButton* m_startBtn = nullptr;
-    QPushButton* m_cancelBtn = nullptr;
-    QPushButton* m_browseBtn = nullptr;
-    QProgressBar* m_bar = nullptr;
-    QLabel* m_statusLabel = nullptr;
-    QLabel* m_speedLabel = nullptr;
+    QTableWidget* m_table = nullptr;
+    QSpinBox* m_maxBox = nullptr;
+    QPushButton* m_addBtn = nullptr;
+    QPushButton* m_pauseBtn = nullptr;
+    QPushButton* m_resumeBtn = nullptr;
+    QPushButton* m_removeBtn = nullptr;
 
-    DownloadEngine* m_engine = nullptr;
-    QElapsedTimer m_speedTimer;
-    qint64 m_lastBytes = 0;
+    DownloadQueue* m_queue = nullptr;
 };
