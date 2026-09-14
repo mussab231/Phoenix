@@ -1,0 +1,14 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="phoenix-16.png">assets/icons/phoenix-16.png</file>
+    <file alias="phoenix-24.png">assets/icons/phoenix-24.png</file>
+    <file alias="phoenix-32.png">assets/icons/phoenix-32.png</file>
+    <file alias="phoenix-48.png">assets/icons/phoenix-48.png</file>
+    <file alias="phoenix-64.png">assets/icons/phoenix-64.png</file>
+    <file alias="phoenix-128.png">assets/icons/phoenix-128.png</file>
+    <file alias="phoenix-256.png">assets/icons/phoenix-256.png</file>
+  </qresource>
+  <qresource prefix="/theme">
+    <file alias="theme.qss">src/gui/theme.qss</file>
+  </qresource>
+</RCC>

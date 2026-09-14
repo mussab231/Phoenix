@@ -8,10 +8,12 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStatusBar>
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -25,17 +27,27 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.5"));
-    resize(780, 440);
+    setWindowTitle(QStringLiteral("Phoenix 0.6"));
+    resize(820, 460);
+
+    // Phoenix flame icon (multi-size so 16px taskbar and 256px details both crisp).
+    QIcon icon;
+    for (int s : {16, 24, 32, 48, 64, 128, 256})
+        icon.addFile(QStringLiteral(":/icons/phoenix-%1.png").arg(s));
+    setWindowIcon(icon);
 
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
 
     auto* topRow = new QHBoxLayout();
-    m_addBtn = new QPushButton(QStringLiteral("Add..."), central);
+    m_addBtn = new QPushButton(QStringLiteral("Add"), central);
+    m_addBtn->setProperty("accent", true);
     m_pauseBtn = new QPushButton(QStringLiteral("Pause"), central);
     m_resumeBtn = new QPushButton(QStringLiteral("Resume"), central);
     m_removeBtn = new QPushButton(QStringLiteral("Remove"), central);
+    m_pauseBtn->setToolTip(QStringLiteral("Pause the selected download (resumable)"));
+    m_resumeBtn->setToolTip(QStringLiteral("Resume the selected download"));
+    m_removeBtn->setToolTip(QStringLiteral("Remove the selected download from the queue"));
     topRow->addWidget(m_addBtn);
     topRow->addWidget(m_pauseBtn);
     topRow->addWidget(m_resumeBtn);
@@ -77,6 +89,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_queue, &DownloadQueue::itemAdded, this, &MainWindow::onItemAdded);
     connect(m_queue, &DownloadQueue::itemChanged, this, &MainWindow::onItemChanged);
     connect(m_queue, &DownloadQueue::itemRemoved, this, &MainWindow::onItemRemoved);
+    connect(m_queue, &DownloadQueue::itemAdded, this, &MainWindow::refreshStatus);
+    connect(m_queue, &DownloadQueue::itemChanged, this, &MainWindow::refreshStatus);
+    connect(m_queue, &DownloadQueue::itemRemoved, this, &MainWindow::refreshStatus);
+    connect(m_queue, &DownloadQueue::queueFinished, statusBar(),
+            [this] { refreshStatus(); });
+
+    refreshStatus();
 }
 
 void MainWindow::onAdd() {
@@ -181,6 +200,27 @@ void MainWindow::updateRow(int id) {
         ->setText(data.speedBps > 0 ? formatSpeed(data.speedBps) : QString());
     m_table->item(row, kColStatus)
         ->setText(QString::fromStdString(data.statusText));
+}
+
+void MainWindow::refreshStatus() {
+    int running = 0, queued = 0, paused = 0, done = 0, failed = 0;
+    for (const auto& it : m_queue->items()) {
+        switch (it.state) {
+        case DownloadState::Running: ++running; break;
+        case DownloadState::Idle: ++queued; break;
+        case DownloadState::Paused: ++paused; break;
+        case DownloadState::Completed: ++done; break;
+        case DownloadState::Failed: ++failed; break;
+        case DownloadState::Cancelled: break;
+        }
+    }
+    QString msg = QStringLiteral("Running: %1   Queued: %2   Completed: %3")
+                      .arg(running).arg(queued).arg(done);
+    if (paused)
+        msg += QStringLiteral("   Paused: %1").arg(paused);
+    if (failed)
+        msg += QStringLiteral("   Failed: %1").arg(failed);
+    statusBar()->showMessage(msg);
 }
 
 QString MainWindow::formatSize(qint64 bytes) {

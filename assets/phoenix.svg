@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="fire" x1="0.72" y1="0.1" x2="0.24" y2="0.88">
+      <stop offset="0"   stop-color="#FFE08A"/>
+      <stop offset="0.25" stop-color="#FFC94D"/>
+      <stop offset="0.55" stop-color="#FF8A2A"/>
+      <stop offset="0.8"  stop-color="#FF5E1A"/>
+      <stop offset="1"    stop-color="#E22C00"/>
+    </linearGradient>
+    <linearGradient id="hot" x1="0.55" y1="0.1" x2="0.45" y2="1">
+      <stop offset="0"   stop-color="#FFF6D6"/>
+      <stop offset="0.45" stop-color="#FFD34D"/>
+      <stop offset="1"    stop-color="#FF8A2A"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.45" r="0.55">
+      <stop offset="0"   stop-color="#FF8C32" stop-opacity="0.42"/>
+      <stop offset="0.6" stop-color="#FF6E1E" stop-opacity="0.16"/>
+      <stop offset="1"   stop-color="#FF6E1E" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- warm glow behind the bird -->
+  <circle cx="150" cy="108" r="128" fill="url(#halo)"/>
+
+  <!-- tail flames flowing down-left -->
+  <path d="M96,150 C98,172 106,194 122,208 C108,206 92,198 86,182 C82,170 88,158 96,150 Z" fill="url(#fire)"/>
+  <path d="M88,152 C84,182 72,210 52,224 C66,214 78,198 82,178 C84,168 86,160 88,152 Z" fill="url(#fire)"/>
+  <path d="M80,156 C70,180 54,200 32,206 C52,196 66,180 74,162 C76,160 78,158 80,156 Z" fill="url(#fire)"/>
+
+  <!-- lower wing crescent -->
+  <path d="M144,112 C126,80 102,60 70,52 C100,58 132,72 152,100 C150,108 148,112 144,112 Z" fill="url(#fire)"/>
+  <path d="M70,52 C56,50 44,52 36,56 C48,60 60,58 70,52 Z" fill="url(#fire)"/>
+
+  <!-- main wing sweeping up-right -->
+  <path d="M150,104 C128,66 100,42 64,28 C98,34 138,46 168,84 C166,96 160,102 150,104 Z" fill="url(#fire)"/>
+  <path d="M64,28 C54,22 44,20 36,22 C46,28 56,32 64,28 Z" fill="url(#fire)"/>
+
+  <!-- body -->
+  <path d="M158,82 C166,96 162,120 136,142 C120,156 104,158 96,152 C108,134 118,112 122,92 C128,78 142,74 158,82 Z" fill="url(#hot)"/>
+
+  <!-- belly flame -->
+  <path d="M104,148 C92,158 84,172 84,188 C96,178 104,164 108,150 C106,149 105,148 104,148 Z" fill="url(#fire)" opacity="0.85"/>
+
+  <!-- head, crest, beak -->
+  <circle cx="160" cy="70" r="16" fill="url(#hot)"/>
+  <path d="M152,58 C148,44 156,32 170,26 C160,40 162,50 152,58 Z" fill="url(#fire)"/>
+  <path d="M162,60 C164,46 176,38 192,40 C180,50 176,58 162,60 Z" fill="url(#fire)"/>
+  <path d="M170,64 L196,66 L172,74 Z" fill="#A61608"/>
+  <circle cx="166" cy="68" r="2.6" fill="#2A0E00"/>
+
+  <!-- floating embers -->
+  <circle cx="198" cy="36" r="3.2" fill="#FFE08A" opacity="0.9"/>
+  <circle cx="218" cy="58" r="2"   fill="#FFE08A" opacity="0.7"/>
+  <circle cx="208" cy="92" r="2.4" fill="#FFE08A" opacity="0.8"/>
+  <circle cx="188" cy="26" r="1.6" fill="#FFC94D" opacity="0.8"/>
+</svg>

@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
-project(Phoenix VERSION 0.5.0 LANGUAGES CXX)
+project(Phoenix VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 # MSYS2 MinGW Qt location (override with -DCMAKE_PREFIX_PATH=... if needed)
 if(NOT DEFINED CMAKE_PREFIX_PATH)
@@ -14,6 +15,11 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 # NOTE: no WIN32 flag on purpose during development so console
 # output (--self-test) stays visible. Added for release builds later.
+
+# Embed the Phoenix icon into the .exe itself (window icon comes from Qt).
+configure_file(src/app.rc.in ${CMAKE_CURRENT_BINARY_DIR}/app.rc @ONLY)
+set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/app.rc PROPERTIES LANGUAGE RC)
+
 add_executable(Phoenix
     src/main.cpp
     src/core/HttpClient.cpp
@@ -23,6 +29,8 @@ add_executable(Phoenix
     src/core/PowerControl.cpp
     src/gui/MainWindow.cpp
     src/gui/AddDialog.cpp
+    Phoenix.qrc
+    ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
 
 target_include_directories(Phoenix PRIVATE src)

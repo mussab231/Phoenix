@@ -16,7 +16,10 @@ AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
     resize(520, 200);
 
     auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(12);
     auto* form = new QFormLayout();
+    form->setSpacing(10);
 
     m_urlEdit = new QLineEdit(this);
     m_urlEdit->setPlaceholderText(QStringLiteral("https://example.com/file.zip"));
@@ -59,6 +62,8 @@ AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
             accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+    m_urlEdit->setFocus();
 }
 
 QString AddDialog::url() const {

@@ -27,6 +27,7 @@ private:
     int rowForId(int id) const;
     int selectedId() const;
     void updateRow(int id);
+    void refreshStatus();
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
     static QString baseName(const QString& path);

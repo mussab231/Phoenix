@@ -8,7 +8,7 @@ Goal: match — then surpass — Internet Download Manager.
 
 ---
 
-## ✨ Features (v0.5)
+## ✨ Features (v0.6)
 
 | Feature | Status |
 |---------|--------|
@@ -18,12 +18,13 @@ Goal: match — then surpass — Internet Download Manager.
 | Per-download pause / resume / remove, live speed per item | ✅ |
 | Scheduler: start a download at a chosen date/time (queued as "Scheduled …") | ✅ |
 | When done: sleep / hibernate / shutdown the PC automatically | ✅ |
+| Modern dark UI (Qt Style Sheets, Phoenix-orange accents, live status bar) | ✅ |
+| Phoenix flame app icon: window + taskbar + embedded in `.exe` | ✅ |
 | Smart fallback to single connection when server ignores `Range` | ✅ |
-| Qt GUI: queue table, per-row progress, Add dialog | ✅ |
 | Byte-for-byte verified downloads (segmented == single-connection) | ✅ |
 | Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`) | ✅ |
-| Speed limiter + smart retry | 🔜 v0.6 |
-| Browser integration (link catching) | 🔜 v0.7 |
+| Speed limiter + smart retry | 🔜 v0.7 |
+| Browser integration (link catching) | 🔜 v0.8 |
 
 ## 🛠️ Requirements
 
@@ -58,8 +59,13 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 ```
 Phoenix/
 ├── CMakeLists.txt
+├── Phoenix.qrc               # icon PNGs + theme.qss bundled into the binary
+├── assets/
+│   ├── phoenix.svg           # source artwork (edit this, regenerate the rest)
+│   ├── phoenix.ico           # embedded into Phoenix.exe (src/app.rc.in)
+│   └── icons/                # phoenix-16..256.png (multi-size icon set)
 ├── src/
-│   ├── main.cpp              # entry point + self-tests
+│   ├── main.cpp              # entry point + self-tests + theme setup
 │   ├── core/
 │   │   ├── HttpClient.*      # WinHTTP wrapper (size probe, GET, Range, segments)
 │   │   ├── ResumeStore.*     # .phoenix-state persistence (pause/crash recovery)
@@ -70,10 +76,27 @@ Phoenix/
 │   │   ├── DownloadTask.h
 │   │   └── DownloadItem.h    # one queue entry
 │   └── gui/
-│       ├── MainWindow.*      # queue table + controls
-│       └── AddDialog.*       # new-download dialog
+│       ├── MainWindow.*      # queue table + controls + status bar
+│       ├── AddDialog.*       # new-download dialog
+│       └── theme.qss         # dark Phoenix style sheet
+├── tools/
+│   └── make_icon/            # dev tool: SVG -> PNG sizes + .ico (needs qt6-svg)
 └── .vscode/                  # build / run / debug tasks
 ```
+
+## 🐦‍🔥 Changing the icon
+
+1. Edit `assets/phoenix.svg` (the flame-bird artwork).
+2. Regenerate the icon set from MSYS2:
+
+   ```powershell
+   cmake -S tools/make_icon -B tools/make_icon/build -G Ninja "-DCMAKE_PREFIX_PATH=C:/msys64/mingw64"
+   cmake --build tools/make_icon/build   # runs make_icon -> rewrites assets/icons/*.png + phoenix.ico
+   ```
+
+3. Rebuild Phoenix: the window/taskbar icon comes from the PNGs via `Phoenix.qrc`, and the `.exe` file icon from `phoenix.ico` via `src/app.rc.in`. Done.
+
+> Needs `mingw-w64-x86_64-qt6-svg` (already installed). To use your *own* image instead of the SVG, drop a square PNG over `assets/icons/phoenix-256.png` and re-add the other sizes.
 
 ## 📄 License
 

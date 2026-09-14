@@ -9,6 +9,10 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFile>
+#include <QIcon>
+#include <QPalette>
+#include <QStyleFactory>
 #include <QTimer>
 
 #include <atomic>
@@ -47,6 +51,31 @@ bool filesIdentical(const std::string& a, const std::string& b) {
         if (std::memcmp(ba.data(), bb.data(), static_cast<size_t>(na)) != 0)
             return false;
     }
+}
+
+// Dark Fusion theme + Phoenix style sheet. GUI only.
+void applyTheme(QApplication& app) {
+    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    QPalette pal;
+    pal.setColor(QPalette::Window, QColor(0x17, 0x17, 0x1f));
+    pal.setColor(QPalette::WindowText, QColor(0xe9, 0xe9, 0xf2));
+    pal.setColor(QPalette::Base, QColor(0x19, 0x19, 0x22));
+    pal.setColor(QPalette::AlternateBase, QColor(0x1d, 0x1d, 0x29));
+    pal.setColor(QPalette::Text, QColor(0xe9, 0xe9, 0xf2));
+    pal.setColor(QPalette::Button, QColor(0x2a, 0x2a, 0x3d));
+    pal.setColor(QPalette::ButtonText, QColor(0xe9, 0xe9, 0xf2));
+    pal.setColor(QPalette::Highlight, QColor(0xff, 0x7a, 0x1a));
+    pal.setColor(QPalette::HighlightedText, QColor(0x1a, 0x12, 0x0a));
+    pal.setColor(QPalette::ToolTipBase, QColor(0x26, 0x26, 0x38));
+    pal.setColor(QPalette::ToolTipText, QColor(0xe9, 0xe9, 0xf2));
+    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(0x6a, 0x6a, 0x80));
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x6a, 0x6a, 0x80));
+    app.setPalette(pal);
+
+    QFile theme(QStringLiteral(":/theme/theme.qss"));
+    if (theme.open(QIODevice::ReadOnly))
+        app.setStyleSheet(QString::fromUtf8(theme.readAll()));
 }
 
 } // namespace
@@ -419,6 +448,13 @@ int main(int argc, char** argv) {
             return runSleepTest();
     }
     QApplication app(argc, argv);
+    applyTheme(app);
+
+    QIcon windowIcon;
+    for (int s : {16, 24, 32, 48, 64, 128, 256})
+        windowIcon.addFile(QStringLiteral(":/icons/phoenix-%1.png").arg(s));
+    app.setWindowIcon(windowIcon);
+
     MainWindow w;
     w.show();
     return app.exec();
