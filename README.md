@@ -8,10 +8,11 @@ Goal: match — then surpass — Internet Download Manager.
 > 🇸🇾 **بالعربي:** برنامج تحميل سريع لويندوز، بيقسّم الملف لعدة مقاطع وبيحمّلها بالتوازي،
 > وبيدعم الاستكمال بعد الإيقاف أو انقطاع النت، مع قائمة تحميلات متعددة. مكتوب بلغة C++ ومبني على WinHTTP وQt6.
 > من الإصدار 0.8 يدعم التقاط الروابط تلقائياً عبر `phoenix://` ومحلي `http://127.0.0.1:51047` ومراقبة الحافظة.
+> ومن الإصدار 0.9 يحفظ الإعدادات (المجلد الافتراضي، عدد الاتصالات، السرعة، إجراءات الطاقة، تتبع الحافظة، موقع النافذة).
 
 ---
 
-## ✨ Features (v0.8)
+## ✨ Features (v0.9)
 
 | Feature | Status |
 |---------|--------|
@@ -32,7 +33,9 @@ Goal: match — then surpass — Internet Download Manager.
 | **Localhost HTTP listener** (`http://127.0.0.1:51047/add?url=...`): add links without the protocol handler | ✅ |
 | **Clipboard watcher** (opt-in from tray menu): detects copied download URLs and offers to add them | ✅ |
 | Single-instance: a running Phoenix receives `phoenix://` links from new OS-launched instances | ✅ |
-| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`) | ✅ |
+| **Persistent settings**: default folder, connections, max speed, concurrency, when-done action, clipboard watch and window position are saved and restored | ✅ |
+| **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`) | ✅ |
 
 ## 🛠️ Requirements
 
@@ -68,6 +71,7 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 .\build\Phoenix.exe --self-test-listen  # local HTTP listener (/add + /status round-trip)
 .\build\Phoenix.exe --self-test-proto   # phoenix:// encode/decode round trip
 .\build\Phoenix.exe --self-test-urlmatch # URL classification for clipboard catching
+.\build\Phoenix.exe --self-test-settings # saved-preferences round trip (defaults, clamp, persist)
 .\build\Phoenix.exe --register         # register phoenix:// handler in HKCU (also done on first GUI launch)
 .\build\Phoenix.exe --unregister       # remove the protocol registration
 ```

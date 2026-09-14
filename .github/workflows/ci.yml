@@ -44,6 +44,7 @@ jobs:
         run: |
           ./build/Phoenix.exe --self-test-proto
           ./build/Phoenix.exe --self-test-urlmatch
+          ./build/Phoenix.exe --self-test-settings
 
       - name: Network self-tests
         shell: msys2 {0}
