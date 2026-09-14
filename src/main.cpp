@@ -4,6 +4,7 @@
 #include "core/PowerControl.h"
 #include "core/ProtocolRegistrar.h"
 #include "core/RateLimiter.h"
+#include "core/SettingsStore.h"
 #include "core/SingleInstance.h"
 #include "core/UrlCodec.h"
 #include "core/UrlMatcher.h"
@@ -700,6 +701,52 @@ int runUrlMatchTest() {
     return 0;
 }
 
+// Round-trip of the persisted settings: defaults, write, reload from a fresh
+// SettingsStore reading the same .ini file.
+int runSettingsTest() {
+    const QString ini = QString::fromStdString(tempFile("phoenix_settings_test.ini"));
+    QFile::remove(ini);
+
+    {
+        SettingsStore s(ini);
+        if (s.maxConcurrent() != 3 || s.defaultSegments() != 8 ||
+            s.maxSpeedKBs() != 0 || s.autoAction() != 0 || s.watchClipboard()) {
+            std::printf("SETTINGS-TEST FAILED: wrong defaults\n");
+            return 1;
+        }
+        s.setDefaultDirectory(QStringLiteral("C:/Data/Downloads"));
+        s.setMaxConcurrent(5);
+        s.setDefaultSegments(2);
+        s.setMaxSpeedKBs(512);
+        s.setAutoAction(2);
+        s.setWatchClipboard(true);
+        s.setMainGeometry(QByteArray::fromHex("0100000001000000")); // 1,1
+    }
+    {
+        SettingsStore s(ini);
+        if (s.defaultDirectory() != QStringLiteral("C:/Data/Downloads") ||
+            s.maxConcurrent() != 5 || s.defaultSegments() != 2 ||
+            s.maxSpeedKBs() != 512 || s.autoAction() != 2 ||
+            !s.watchClipboard()) {
+            std::printf("SETTINGS-TEST FAILED: values did not persist\n");
+            return 1;
+        }
+        if (s.mainGeometry().isEmpty()) {
+            std::printf("SETTINGS-TEST FAILED: window geometry did not persist\n");
+            return 1;
+        }
+        // Values are clamped back to widget ranges even if the file was edited.
+        s.setMaxConcurrent(99);
+        if (s.maxConcurrent() != 5) {
+            std::printf("SETTINGS-TEST FAILED: maxConcurrent not clamped\n");
+            return 1;
+        }
+    }
+    std::printf("SETTINGS-TEST OK -> %s\n", ini.toUtf8().constData());
+    QFile::remove(ini);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -725,6 +772,8 @@ int main(int argc, char** argv) {
             return runProtoTest();
         if (arg == "--self-test-urlmatch")
             return runUrlMatchTest();
+        if (arg == "--self-test-settings")
+            return runSettingsTest();
         if (arg == "--register")
             return ProtocolRegistrar::registerHandler() ? 0 : 1;
         if (arg == "--unregister")
@@ -743,6 +792,10 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
     applyTheme(app);
+    // Persistent settings live in HKCU\Software\Phoenix\Phoenix (QSettings).
+    app.setOrganizationName(QStringLiteral("Phoenix"));
+    app.setOrganizationDomain(QStringLiteral("phoenix.local"));
+    app.setApplicationName(QStringLiteral("Phoenix"));
 
     QIcon windowIcon;
     for (int s : {16, 24, 32, 48, 64, 128, 256})

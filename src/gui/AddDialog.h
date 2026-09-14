@@ -8,10 +8,15 @@ class QDateTimeEdit;
 class QLineEdit;
 class QSpinBox;
 
+// New-download dialog. Initial defaults (connections, max speed in KB/s, start
+// folder for the file browser) come from the app settings, passed in.
 class AddDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit AddDialog(QWidget* parent = nullptr);
+    explicit AddDialog(QWidget* parent = nullptr,
+                       int defaultSegments = 8,
+                       int defaultMaxSpeedKBs = 0,
+                       const QString& defaultDir = QString());
 
     QString url() const;
     QString outputPath() const;
@@ -30,4 +35,5 @@ private:
     QSpinBox* m_speedBox = nullptr;
     QCheckBox* m_scheduleCheck = nullptr;
     QDateTimeEdit* m_scheduleEdit = nullptr;
+    QString m_defaultDir;
 };

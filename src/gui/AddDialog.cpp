@@ -11,7 +11,9 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
-AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
+AddDialog::AddDialog(QWidget* parent, int defaultSegments,
+                     int defaultMaxSpeedKBs, const QString& defaultDir)
+    : QDialog(parent), m_defaultDir(defaultDir) {
     setWindowTitle(QStringLiteral("Add download"));
     resize(520, 200);
 
@@ -36,12 +38,12 @@ AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
 
     m_segmentsBox = new QSpinBox(this);
     m_segmentsBox->setRange(1, 16);
-    m_segmentsBox->setValue(8);
+    m_segmentsBox->setValue(defaultSegments);
     form->addRow(QStringLiteral("Connections:"), m_segmentsBox);
 
     m_speedBox = new QSpinBox(this);
     m_speedBox->setRange(0, 100000); // KB/s
-    m_speedBox->setValue(0);
+    m_speedBox->setValue(defaultMaxSpeedKBs);
     m_speedBox->setSuffix(QStringLiteral(" KB/s"));
     m_speedBox->setSpecialValueText(QStringLiteral("Unlimited"));
     m_speedBox->setToolTip(
@@ -100,7 +102,9 @@ qint64 AddDialog::scheduledAt() const {
 }
 
 void AddDialog::onBrowse() {
-    QString file = QFileDialog::getSaveFileName(this, QStringLiteral("Save as"));
+    QString file = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Save as"),
+        m_defaultDir.isEmpty() ? QString() : m_defaultDir + QStringLiteral("/download.bin"));
     if (!file.isEmpty())
         m_pathEdit->setText(file);
 }

@@ -2,8 +2,10 @@
 
 #include "core/ClipboardWatcher.h"
 #include "core/DownloadQueue.h"
+#include "core/SettingsStore.h"
 #include "core/UrlMatcher.h"
 #include "gui/AddDialog.h"
+#include "gui/SettingsDialog.h"
 #include "models/DownloadItem.h"
 
 #include <QCloseEvent>
@@ -38,7 +40,7 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.8"));
+    setWindowTitle(QStringLiteral("Phoenix 0.9"));
     resize(820, 460);
 
     // Phoenix flame icon (multi-size so 16px taskbar and 256px details both crisp).
@@ -56,13 +58,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_pauseBtn = new QPushButton(QStringLiteral("Pause"), central);
     m_resumeBtn = new QPushButton(QStringLiteral("Resume"), central);
     m_removeBtn = new QPushButton(QStringLiteral("Remove"), central);
+    auto* settingsBtn = new QPushButton(QStringLiteral("Settings"), central);
     m_pauseBtn->setToolTip(QStringLiteral("Pause the selected download (resumable)"));
     m_resumeBtn->setToolTip(QStringLiteral("Resume the selected download"));
     m_removeBtn->setToolTip(QStringLiteral("Remove the selected download from the queue"));
+    settingsBtn->setToolTip(QStringLiteral("Saved preferences: folder, connections, speed, power, clipboard"));
     topRow->addWidget(m_addBtn);
     topRow->addWidget(m_pauseBtn);
     topRow->addWidget(m_resumeBtn);
     topRow->addWidget(m_removeBtn);
+    topRow->addWidget(settingsBtn);
     topRow->addStretch(1);
     topRow->addWidget(new QLabel(QStringLiteral("Max simultaneous:"), central));
     m_maxBox = new QSpinBox(central);
@@ -89,10 +94,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setCentralWidget(central);
 
     m_queue = new DownloadQueue(this);
+    m_settings = new SettingsStore(QString(), this);
     connect(m_addBtn, &QPushButton::clicked, this, &MainWindow::onAdd);
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPause);
     connect(m_resumeBtn, &QPushButton::clicked, this, &MainWindow::onResume);
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
+    connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
     connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
             &DownloadQueue::setMaxConcurrent);
     connect(m_doneBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -119,7 +126,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             });
 
     setupTray();
+    applySettingsToUi();
+    if (!m_settings->mainGeometry().isEmpty())
+        restoreGeometry(m_settings->mainGeometry());
     refreshStatus();
+}
+
+void MainWindow::applySettingsToUi() {
+    m_maxBox->setValue(m_settings->maxConcurrent());
+    m_doneBox->setCurrentIndex(m_settings->autoAction());
+    if (m_watchClipAct)
+        m_watchClipAct->setChecked(m_settings->watchClipboard());
+    if (m_clipWatcher)
+        m_clipWatcher->setEnabled(m_settings->watchClipboard());
 }
 
 void MainWindow::setupTray() {
@@ -138,6 +157,9 @@ void MainWindow::setupTray() {
     QAction* addAct = m_trayMenu->addAction(QStringLiteral("Add Download..."));
     connect(addAct, &QAction::triggered, this, &MainWindow::onAdd);
 
+    QAction* settingsAct = m_trayMenu->addAction(QStringLiteral("Settings..."));
+    connect(settingsAct, &QAction::triggered, this, &MainWindow::onSettings);
+
     QAction* pauseAll = m_trayMenu->addAction(QStringLiteral("Pause All"));
     connect(pauseAll, &QAction::triggered, this, [this] {
         for (auto it : m_queue->items())
@@ -153,9 +175,14 @@ void MainWindow::setupTray() {
 
     QAction* watchClip = m_trayMenu->addAction(QStringLiteral("Watch clipboard for links"));
     watchClip->setCheckable(true);
-    watchClip->setChecked(false);
-    connect(watchClip, &QAction::toggled, m_clipWatcher,
-            &ClipboardWatcher::setEnabled);
+    watchClip->setChecked(m_settings->watchClipboard());
+    m_watchClipAct = watchClip;
+    connect(watchClip, &QAction::toggled, this, [this](bool on) {
+        if (m_settings)
+            m_settings->setWatchClipboard(on);
+        if (m_clipWatcher)
+            m_clipWatcher->setEnabled(on);
+    });
 
     m_trayMenu->addSeparator();
     QAction* quitAct = m_trayMenu->addAction(QStringLiteral("Quit"));
@@ -200,58 +227,64 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         event->ignore();
         return;
     }
+    if (m_settings)
+        m_settings->setMainGeometry(saveGeometry());
     QMainWindow::closeEvent(event);
 }
 
-QString MainWindow::defaultDownloadPath(const QString& fileName) {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (dir.isEmpty())
-        dir = QDir::homePath() + QStringLiteral("/Downloads");
-    QString safe = fileName;
-    if (safe.isEmpty())
-        safe = QStringLiteral("download.bin");
+QString MainWindow::sanitizeFileName(const QString& fileName) {
     QString cleaned;
-    cleaned.reserve(safe.size());
-    for (QChar ch : safe) {
+    cleaned.reserve(fileName.size());
+    for (QChar ch : fileName) {
         uchar c = ch.unicode();
         if (c < 0x20 || strchr("<>:\"/\\|?*", static_cast<char>(c & 0x7f)))
             continue;
         cleaned += ch;
     }
-    if (cleaned.isEmpty())
-        cleaned = QStringLiteral("download.bin");
-    return dir + QStringLiteral("/") + cleaned;
+    return cleaned.isEmpty() ? QStringLiteral("download.bin") : cleaned;
 }
 
 void MainWindow::acceptIncomingUrl(const QString& url, const QString& fileName) {
     if (url.isEmpty())
         return;
-    QString target = fileName;
-    if (target.isEmpty()) {
+    QString safe = fileName;
+    if (safe.isEmpty()) {
         // derive the filename from the URL basename, stripping the query
         QUrl u(url);
         QString path = u.path();
         int slash = path.lastIndexOf('/');
-        QString base;
         if (slash >= 0)
-            base = path.mid(slash + 1);
+            safe = path.mid(slash + 1);
         else
-            base = path;
-        if (base.isEmpty())
-            base = QStringLiteral("download.bin");
-        target = base;
+            safe = path;
+        if (safe.isEmpty())
+            safe = QStringLiteral("download.bin");
     }
-    m_queue->addDownload(url.toStdString(), defaultDownloadPath(target).toStdString());
+    QString dir = m_settings ? m_settings->defaultDirectory() : QString();
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (dir.isEmpty())
+        dir = QDir::homePath() + QStringLiteral("/Downloads");
+    const QString target = dir + QStringLiteral("/") + sanitizeFileName(safe);
+    m_queue->addDownload(url.toStdString(), target.toStdString());
     showWindow();
 }
 
 void MainWindow::onAdd() {
-    AddDialog dlg(this);
+    AddDialog dlg(this, m_settings->defaultSegments(), m_settings->maxSpeedKBs(),
+                  m_settings->defaultDirectory());
     if (dlg.exec() != QDialog::Accepted)
         return;
     m_queue->addDownload(dlg.url().toStdString(), dlg.outputPath().toStdString(),
                          dlg.segments(), dlg.isScheduled() ? dlg.scheduledAt() : 0,
                          dlg.maxSpeedBps());
+}
+
+void MainWindow::onSettings() {
+    SettingsDialog dlg(m_settings, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    applySettingsToUi();
 }
 
 void MainWindow::onPause() {

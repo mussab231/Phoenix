@@ -9,8 +9,10 @@ class QSpinBox;
 class QSystemTrayIcon;
 class QTableWidget;
 class QMenu;
+class QAction;
 class ClipboardWatcher;
 class DownloadQueue;
+class SettingsStore;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -34,6 +36,7 @@ private slots:
     void onPause();
     void onResume();
     void onRemove();
+    void onSettings();
     void onItemAdded(int id);
     void onItemChanged(int id);
     void onItemRemoved(int id);
@@ -44,10 +47,11 @@ private:
     void updateRow(int id);
     void refreshStatus();
     void setupTray();
+    void applySettingsToUi();
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
     static QString baseName(const QString& path);
-    static QString defaultDownloadPath(const QString& fileName);
+    static QString sanitizeFileName(const QString& fileName);
 
     QTableWidget* m_table = nullptr;
     QSpinBox* m_maxBox = nullptr;
@@ -58,8 +62,10 @@ private:
     QPushButton* m_removeBtn = nullptr;
 
     DownloadQueue* m_queue = nullptr;
+    SettingsStore* m_settings = nullptr;
     QSystemTrayIcon* m_tray = nullptr;
     QMenu* m_trayMenu = nullptr;
+    QAction* m_watchClipAct = nullptr;
     ClipboardWatcher* m_clipWatcher = nullptr;
     bool m_firstHide = true;
 };
