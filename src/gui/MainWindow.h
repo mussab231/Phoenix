@@ -6,13 +6,28 @@ class QComboBox;
 class QProgressBar;
 class QPushButton;
 class QSpinBox;
+class QSystemTrayIcon;
 class QTableWidget;
+class QMenu;
+class ClipboardWatcher;
 class DownloadQueue;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+
+    DownloadQueue* queue() const { return m_queue; }
+
+    // Adds a url handed to us from outside (phoenix:// link, HTTP listener,
+    // clipboard). fileName (optional) is used as the target filename.
+    void acceptIncomingUrl(const QString& url, const QString& fileName = {});
+
+public slots:
+    void showWindow();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onAdd();
@@ -28,9 +43,11 @@ private:
     int selectedId() const;
     void updateRow(int id);
     void refreshStatus();
+    void setupTray();
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
     static QString baseName(const QString& path);
+    static QString defaultDownloadPath(const QString& fileName);
 
     QTableWidget* m_table = nullptr;
     QSpinBox* m_maxBox = nullptr;
@@ -41,4 +58,8 @@ private:
     QPushButton* m_removeBtn = nullptr;
 
     DownloadQueue* m_queue = nullptr;
+    QSystemTrayIcon* m_tray = nullptr;
+    QMenu* m_trayMenu = nullptr;
+    ClipboardWatcher* m_clipWatcher = nullptr;
+    bool m_firstHide = true;
 };

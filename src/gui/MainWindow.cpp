@@ -1,22 +1,33 @@
 #include "gui/MainWindow.h"
 
+#include "core/ClipboardWatcher.h"
 #include "core/DownloadQueue.h"
+#include "core/UrlMatcher.h"
 #include "gui/AddDialog.h"
 #include "models/DownloadItem.h"
 
+#include <QCloseEvent>
 #include <QComboBox>
+#include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
+#include <QMenu>
+#include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QStatusBar>
+#include <QSystemTrayIcon>
 #include <QTableWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <cstring>
 
 namespace {
 constexpr int kColFile = 0;
@@ -27,7 +38,7 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.7"));
+    setWindowTitle(QStringLiteral("Phoenix 0.8"));
     resize(820, 460);
 
     // Phoenix flame icon (multi-size so 16px taskbar and 256px details both crisp).
@@ -95,7 +106,143 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_queue, &DownloadQueue::queueFinished, statusBar(),
             [this] { refreshStatus(); });
 
+    // Clipboard link catching (off until the user enables it from the tray).
+    m_clipWatcher = new ClipboardWatcher(this);
+    connect(m_clipWatcher, &ClipboardWatcher::urlDetected, this,
+            [this](const QString& url) {
+                acceptIncomingUrl(url);
+                if (m_tray)
+                    m_tray->showMessage(
+                        QStringLiteral("Phoenix"),
+                        QStringLiteral("Download added from clipboard:\n%1").arg(url),
+                        QSystemTrayIcon::Information, 4000);
+            });
+
+    setupTray();
     refreshStatus();
+}
+
+void MainWindow::setupTray() {
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;
+
+    QIcon icon = windowIcon();
+    m_tray = new QSystemTrayIcon(icon, this);
+    m_tray->setToolTip(QStringLiteral("Phoenix Download Manager"));
+
+    m_trayMenu = new QMenu(this);
+    QAction* showAct = m_trayMenu->addAction(QStringLiteral("Show / Hide"));
+    connect(showAct, &QAction::triggered, this, &MainWindow::showWindow);
+    m_trayMenu->addSeparator();
+
+    QAction* addAct = m_trayMenu->addAction(QStringLiteral("Add Download..."));
+    connect(addAct, &QAction::triggered, this, &MainWindow::onAdd);
+
+    QAction* pauseAll = m_trayMenu->addAction(QStringLiteral("Pause All"));
+    connect(pauseAll, &QAction::triggered, this, [this] {
+        for (auto it : m_queue->items())
+            m_queue->pauseDownload(it.id);
+    });
+
+    QAction* resumeAll = m_trayMenu->addAction(QStringLiteral("Resume All"));
+    connect(resumeAll, &QAction::triggered, this, [this] {
+        for (auto it : m_queue->items())
+            if (it.state == DownloadState::Paused)
+                m_queue->resumeDownload(it.id);
+    });
+
+    QAction* watchClip = m_trayMenu->addAction(QStringLiteral("Watch clipboard for links"));
+    watchClip->setCheckable(true);
+    watchClip->setChecked(false);
+    connect(watchClip, &QAction::toggled, m_clipWatcher,
+            &ClipboardWatcher::setEnabled);
+
+    m_trayMenu->addSeparator();
+    QAction* quitAct = m_trayMenu->addAction(QStringLiteral("Quit"));
+    connect(quitAct, &QAction::triggered, this, [this] {
+        QSystemTrayIcon* t = m_tray;
+        m_tray = nullptr; // allow closeEvent to actually quit
+        m_firstHide = false;
+        if (t)
+            t->hide();
+        close();
+    });
+
+    m_tray->setContextMenu(m_trayMenu);
+    connect(m_tray, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+                if (reason == QSystemTrayIcon::Trigger)
+                    showWindow();
+            });
+    m_tray->show();
+}
+
+void MainWindow::showWindow() {
+    show();
+    showNormal();
+    raise();
+    activateWindow();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    // Closing hides to the tray instead of quitting (unless the user asked to
+    // quit from the tray menu, which clears m_tray first).
+    if (m_tray && QSystemTrayIcon::isSystemTrayAvailable()) {
+        if (m_firstHide) {
+            m_firstHide = false;
+            m_tray->showMessage(
+                QStringLiteral("Phoenix"),
+                QStringLiteral("Still running in the tray. Right-click the "
+                               "icon for options."),
+                QSystemTrayIcon::Information, 4000);
+        }
+        hide();
+        event->ignore();
+        return;
+    }
+    QMainWindow::closeEvent(event);
+}
+
+QString MainWindow::defaultDownloadPath(const QString& fileName) {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (dir.isEmpty())
+        dir = QDir::homePath() + QStringLiteral("/Downloads");
+    QString safe = fileName;
+    if (safe.isEmpty())
+        safe = QStringLiteral("download.bin");
+    QString cleaned;
+    cleaned.reserve(safe.size());
+    for (QChar ch : safe) {
+        uchar c = ch.unicode();
+        if (c < 0x20 || strchr("<>:\"/\\|?*", static_cast<char>(c & 0x7f)))
+            continue;
+        cleaned += ch;
+    }
+    if (cleaned.isEmpty())
+        cleaned = QStringLiteral("download.bin");
+    return dir + QStringLiteral("/") + cleaned;
+}
+
+void MainWindow::acceptIncomingUrl(const QString& url, const QString& fileName) {
+    if (url.isEmpty())
+        return;
+    QString target = fileName;
+    if (target.isEmpty()) {
+        // derive the filename from the URL basename, stripping the query
+        QUrl u(url);
+        QString path = u.path();
+        int slash = path.lastIndexOf('/');
+        QString base;
+        if (slash >= 0)
+            base = path.mid(slash + 1);
+        else
+            base = path;
+        if (base.isEmpty())
+            base = QStringLiteral("download.bin");
+        target = base;
+    }
+    m_queue->addDownload(url.toStdString(), defaultDownloadPath(target).toStdString());
+    showWindow();
 }
 
 void MainWindow::onAdd() {

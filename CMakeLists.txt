@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Phoenix VERSION 0.7.0 LANGUAGES CXX)
+project(Phoenix VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 # NOTE: no WIN32 flag on purpose during development so console
 # output (--self-test) stays visible. Added for release builds later.
@@ -28,6 +28,12 @@ add_executable(Phoenix
     src/core/DownloadQueue.cpp
     src/core/PowerControl.cpp
     src/core/RateLimiter.cpp
+    src/core/UrlCodec.cpp
+    src/core/UrlMatcher.cpp
+    src/core/ProtocolRegistrar.cpp
+    src/core/SingleInstance.cpp
+    src/core/HttpListener.cpp
+    src/core/ClipboardWatcher.cpp
     src/gui/MainWindow.cpp
     src/gui/AddDialog.cpp
     Phoenix.qrc
@@ -35,4 +41,4 @@ add_executable(Phoenix
 )
 
 target_include_directories(Phoenix PRIVATE src)
-target_link_libraries(Phoenix PRIVATE Qt6::Widgets winhttp powrprof)
+target_link_libraries(Phoenix PRIVATE Qt6::Widgets Qt6::Network winhttp powrprof ws2_32)

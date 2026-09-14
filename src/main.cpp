@@ -1,10 +1,16 @@
 #include "core/DownloadQueue.h"
 #include "core/HttpClient.h"
+#include "core/HttpListener.h"
 #include "core/PowerControl.h"
+#include "core/ProtocolRegistrar.h"
 #include "core/RateLimiter.h"
+#include "core/SingleInstance.h"
+#include "core/UrlCodec.h"
+#include "core/UrlMatcher.h"
 #include "gui/MainWindow.h"
 #include "models/DownloadItem.h"
 
+#include <winsock2.h>
 #include <windows.h>
 
 #include <QApplication>
@@ -13,6 +19,7 @@
 #include <QFile>
 #include <QIcon>
 #include <QPalette>
+#include <QStatusBar>
 #include <QStyleFactory>
 #include <QTimer>
 
@@ -544,6 +551,155 @@ int runRetryTest() {
     return 0;
 }
 
+// Localhost HTTP listener test: hit /add with an encoded URL, expect the
+// urlReceived signal to fire with the decoded value, and /status to answer.
+int runListenTest() {
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    bool gotSignal = false;
+    bool timedOut = false;
+    QString gotUrl, gotName, statusBody;
+    HttpListener listener;
+    QObject::connect(&listener, &HttpListener::urlReceived, &app,
+                     [&](const QString& u, const QString& n) {
+                         gotUrl = u;
+                         gotName = n;
+                         gotSignal = true;
+                         QCoreApplication::quit();
+                     });
+    QTimer::singleShot(15000, &app, [&] {
+        timedOut = true;
+        QCoreApplication::quit();
+    });
+
+    quint16 port = listener.start(51047);
+    if (port == 0) {
+        std::printf("LISTEN-TEST FAILED: could not bind a port\n");
+        return 1;
+    }
+
+    const std::string target = "https://example.com/path/file name.zip";
+    QTimer::singleShot(0, &app, [&] {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+            return;
+        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s != INVALID_SOCKET) {
+            sockaddr_in a{};
+            a.sin_family = AF_INET;
+            a.sin_port = htons(port);
+            a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0) {
+                const std::string rel = "/add?url=" + UrlCodec::encode(target);
+                const std::string req =
+                    "GET " + rel + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+                send(s, req.data(), static_cast<int>(req.size()), 0);
+                char buf[512]{};
+                int n = recv(s, buf, sizeof(buf) - 1, 0);
+                if (n > 0)
+                    gotUrl = gotUrl; // response body parsed below
+            }
+            closesocket(s);
+        }
+        WSACleanup();
+    });
+
+    app.exec(); // exits on urlReceived or timeout
+    std::printf("Listener on 127.0.0.1:%u, got url signal: %s\n",
+                static_cast<unsigned>(port), gotSignal ? "YES" : "NO");
+    if (timedOut || !gotSignal) {
+        std::printf("LISTEN-TEST FAILED: no urlReceived\n");
+        return 1;
+    }
+    std::printf("Decoded: [%s] name=[%s]\n", gotUrl.toUtf8().constData(),
+                gotName.toUtf8().constData());
+    if (gotUrl.toStdString() != "https://example.com/path/file name.zip") {
+        std::printf("LISTEN-TEST FAILED: wrong decoded url\n");
+        return 1;
+    }
+
+    // /status should return a 200 JSON blob (listener still running).
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    bool statusOk = false;
+    if (s != INVALID_SOCKET) {
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_port = htons(port);
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0) {
+            const std::string req = "GET /status HTTP/1.1\r\nHost: x\r\n\r\n";
+            send(s, req.data(), static_cast<int>(req.size()), 0);
+            char buf[512]{};
+            int n = recv(s, buf, sizeof(buf) - 1, 0);
+            if (n > 0) {
+                statusBody = QString::fromLatin1(buf, n);
+                statusOk = statusBody.contains(QStringLiteral("200")) &&
+                           statusBody.contains(QStringLiteral("\"port\""));
+            }
+        }
+        closesocket(s);
+    }
+    WSACleanup();
+    listener.stop();
+    if (!statusOk) {
+        std::printf("LISTEN-TEST FAILED: /status did not answer 200 JSON\n");
+        return 1;
+    }
+    std::printf("LISTEN-TEST OK\n");
+    return 0;
+}
+
+// phoenix:// codec round trip + negative case.
+int runProtoTest() {
+    const std::string url = "https://example.com/a b.zip";
+    const std::string name = "a b.zip";
+    std::string link = UrlCodec::buildProtocolLink(url, name);
+    std::printf("Protocol link: %s\n", link.c_str());
+    std::string outUrl, outName;
+    if (!UrlCodec::parseProtocolLink(link, outUrl, outName)) {
+        std::printf("PROTO-TEST FAILED: could not parse own link\n");
+        return 1;
+    }
+    if (outUrl != url || outName != name) {
+        std::printf("PROTO-TEST FAILED: ['%s' vs '%s'] ['%s' vs '%s']\n",
+                    outUrl.c_str(), url.c_str(), outName.c_str(), name.c_str());
+        return 1;
+    }
+    std::string non = "https://ordinary.link/x.zip";
+    std::string nu, nn;
+    if (UrlCodec::parseProtocolLink(non, nu, nn)) {
+        std::printf("PROTO-TEST FAILED: accepted a non-phoenix arg\n");
+        return 1;
+    }
+    std::printf("PROTO-TEST OK\n");
+    return 0;
+}
+
+// Pure URL-classification checks (used by the clipboard watcher).
+int runUrlMatchTest() {
+    if (!UrlMatcher::isDownloadUrl("https://example.com/f.zip"))
+        return 1;
+    if (!UrlMatcher::isDownloadUrl("http://example.com/file"))
+        return 1;
+    if (UrlMatcher::isDownloadUrl("ftp://example.com/f"))
+        return 1;
+    if (UrlMatcher::isDownloadUrl("https"))
+        return 1;
+    std::string got = UrlMatcher::extractFirstUrl(
+        "see https://cdn.io/path/v1.2.3/App%20setup.exe and more here");
+    if (got != "https://cdn.io/path/v1.2.3/App%20setup.exe") {
+        std::printf("URLMATCH-TEST FAILED: extracted '%s'\n", got.c_str());
+        return 1;
+    }
+    std::printf("URLMATCH-TEST OK\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -563,7 +719,28 @@ int main(int argc, char** argv) {
             return runSpeedLimitTest();
         if (arg == "--self-test-retry")
             return runRetryTest();
+        if (arg == "--self-test-listen")
+            return runListenTest();
+        if (arg == "--self-test-proto")
+            return runProtoTest();
+        if (arg == "--self-test-urlmatch")
+            return runUrlMatchTest();
+        if (arg == "--register")
+            return ProtocolRegistrar::registerHandler() ? 0 : 1;
+        if (arg == "--unregister")
+            return ProtocolRegistrar::unregisterHandler() ? 0 : 1;
     }
+
+    // OS/browser launch with a phoenix:// link: decode it. If another Phoenix
+    // is running we hand the link over via the single-instance pipe and exit.
+    QString pendingLink;
+    if (argc > 1) {
+        std::string url, name;
+        if (UrlCodec::parseProtocolLink(argv[1], url, name))
+            pendingLink = QString::fromStdString(
+                UrlCodec::buildProtocolLink(url, name));
+    }
+
     QApplication app(argc, argv);
     applyTheme(app);
 
@@ -572,7 +749,49 @@ int main(int argc, char** argv) {
         windowIcon.addFile(QStringLiteral(":/icons/phoenix-%1.png").arg(s));
     app.setWindowIcon(windowIcon);
 
+    SingleInstance single;
+    if (!pendingLink.isEmpty() && single.tryActivate(pendingLink))
+        return 0; // the running instance took the link
+    if (!single.becomeOwner())
+        std::fprintf(stderr, "WARNING: single-instance pipe busy\n");
+
     MainWindow w;
+    QObject::connect(&single, &SingleInstance::commandReceived, [&w](const QString& cmd) {
+        if (cmd == QStringLiteral("::show")) {
+            w.showWindow();
+            return;
+        }
+        std::string url, name;
+        if (UrlCodec::parseProtocolLink(cmd.toStdString(), url, name))
+            w.acceptIncomingUrl(QString::fromStdString(url),
+                                QString::fromStdString(name));
+        else
+            w.acceptIncomingUrl(cmd);
+    });
+    if (!pendingLink.isEmpty()) {
+        const QString link = pendingLink;
+        QTimer::singleShot(0, &w, [&w, link] {
+            std::string url, name;
+            if (UrlCodec::parseProtocolLink(link.toStdString(), url, name))
+                w.acceptIncomingUrl(QString::fromStdString(url),
+                                    QString::fromStdString(name));
+        });
+    }
+
+    // Register the phoenix:// scheme silently on first run (HKCU, no admin).
+    if (!ProtocolRegistrar::isRegistered())
+        ProtocolRegistrar::registerHandler();
+
+    // Loopback HTTP listener for link-catching without the protocol handler.
+    HttpListener listener;
+    QObject::connect(&listener, &HttpListener::urlReceived, &w,
+                     &MainWindow::acceptIncomingUrl);
+    quint16 port = listener.start(51047);
+    if (port)
+        w.statusBar()->showMessage(
+            QStringLiteral("Link catcher ready: http://127.0.0.1:%1  (and phoenix:// links)")
+                .arg(port));
+
     w.show();
     return app.exec();
 }

@@ -5,10 +5,11 @@ Goal: match — then surpass — Internet Download Manager.
 
 > 🇸🇾 **بالعربي:** برنامج تحميل سريع لويندوز، بيقسّم الملف لعدة مقاطع وبيحمّلها بالتوازي،
 > وبيدعم الاستكمال بعد الإيقاف أو انقطاع النت، مع قائمة تحميلات متعددة. مكتوب بلغة C++ ومبني على WinHTTP وQt6.
+> من الإصدار 0.8 يدعم التقاط الروابط تلقائياً عبر `phoenix://` ومحلي `http://127.0.0.1:51047` ومراقبة الحافظة.
 
 ---
 
-## ✨ Features (v0.7)
+## ✨ Features (v0.8)
 
 | Feature | Status |
 |---------|--------|
@@ -24,8 +25,12 @@ Goal: match — then surpass — Internet Download Manager.
 | Byte-for-byte verified downloads (segmented == single-connection) | ✅ |
 | **Speed limiter** (per download, "Max speed" in Add dialog, shared across segments) | ✅ |
 | **Smart retry**: transient errors are retried with exponential backoff (per-segment + whole-call), persistent errors (404/disk/cancel) never retried | ✅ |
-| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`) | ✅ |
-| Browser integration (link catching) | 🔜 v0.8 |
+| **System tray + background mode**: close hides to tray, right-click menu, clipboard watcher | ✅ |
+| **Link catching via `phoenix://` protocol**: registered silently in HKCU on first run | ✅ |
+| **Localhost HTTP listener** (`http://127.0.0.1:51047/add?url=...`): add links without the protocol handler | ✅ |
+| **Clipboard watcher** (opt-in from tray menu): detects copied download URLs and offers to add them | ✅ |
+| Single-instance: a running Phoenix receives `phoenix://` links from new OS-launched instances | ✅ |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`) | ✅ |
 
 ## 🛠️ Requirements
 
@@ -55,6 +60,11 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 .\build\Phoenix.exe --self-test-sleep  # queue finishes -> "sleep" action fires (no-op in test)
 .\build\Phoenix.exe --self-test-limit   # 10 MB capped at 1.5 MiB/s (verifies the limiter throttles)
 .\build\Phoenix.exe --self-test-retry   # injected transient errors -> recovery (whole-call + per-segment)
+.\build\Phoenix.exe --self-test-listen  # local HTTP listener (/add + /status round-trip)
+.\build\Phoenix.exe --self-test-proto   # phoenix:// encode/decode round trip
+.\build\Phoenix.exe --self-test-urlmatch # URL classification for clipboard catching
+.\build\Phoenix.exe --register         # register phoenix:// handler in HKCU (also done on first GUI launch)
+.\build\Phoenix.exe --unregister       # remove the protocol registration
 ```
 
 ## 🗂️ Project layout
@@ -75,6 +85,12 @@ Phoenix/
 │   │   ├── DownloadEngine.*  # one download on a worker thread + Qt signals
 │   │   ├── DownloadQueue.*   # coordinates several engines (concurrency limit, scheduler)
 │   │   ├── RateLimiter.*     # shared token-bucket speed limiter for the segment workers
+│   │   ├── SingleInstance.*   # QLocalServer pipe: forwards phoenix:// links to the running instance
+│   │   ├── HttpListener.*    # loopback HTTP server (127.0.0.1) for browser/link-catching
+│   │   ├── ClipboardWatcher.*# polls clipboard for download URLs, emits urlDetected
+│   │   ├── UrlCodec.*        # phoenix:// protocol: percent-encode/decode, build + parse
+│   │   ├── UrlMatcher.*      # URL classification (isDownloadUrl, extractFirstUrl)
+│   │   ├── ProtocolRegistrar.* # registers phoenix:// handler in HKCU on first launch
 │   │   └── PowerControl.*    # sleep / hibernate / shutdown (test mode built in)
 │   ├── models/
 │   │   ├── DownloadTask.h
