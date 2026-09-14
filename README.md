@@ -1,5 +1,7 @@
 # Phoenix 🐦‍🔥 — Download Manager
 
+[![CI](https://github.com/mussab231/Phoenix/actions/workflows/ci.yml/badge.svg)](https://github.com/mussab231/Phoenix/actions/workflows/ci.yml)
+
 A fast **multi-segment download manager for Windows**, built with **C++17**, **WinHTTP** and **Qt6**.
 Goal: match — then surpass — Internet Download Manager.
 
@@ -47,6 +49,9 @@ cmake --build build
 ```
 
 Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preconfigured in `.vscode/`.
+
+> **CI:** every push to `main` builds Phoenix in a clean MSYS2/MinGW+Qt6 Windows
+> environment and runs the whole headless self-test suite (`.github/workflows/ci.yml`).
 
 ## ▶️ Run
 
@@ -118,6 +123,34 @@ Phoenix/
 
 > Needs `mingw-w64-x86_64-qt6-svg` (already installed). To use your *own* image instead of the SVG, drop a square PNG over `assets/icons/phoenix-256.png` and re-add the other sizes.
 
+## 🧭 Platform & design decisions
+
+- **Windows-native** by choice, not by accident (v0.2+). Phoenix uses **WinHTTP**
+  directly for the HTTP layer and **Winsock** for the loopback link-catcher —
+  no network stack abstraction layer. That buys first-class Windows behaviour
+  (proxy config, TLS, HttpApi-style resume semantics) at the price of
+  Windows-only portability. The core (queue, scheduler, rate limiter, resume
+  store, tests) is deliberately Qt-independent so it could ride on another
+  transport (libcurl… ) behind `HttpClient` in a future port.
+- **Qt6 only for the GUI shell** — the entire download engine is pure
+  C++17/WinAPI and is covered by headless self-tests that run without a GUI
+  or a display server.
+- **`phoenix://` protocol + loopback listener + clipboard watcher** are three
+  complementary link-catching paths so Phoenix never depends on a specific
+  browser or store. The loopback HTTP server binds `127.0.0.1` only — nothing
+  is exposed to the network.
+- **Resume via sidecar state** (`.phoenix-state`): pause, crash or a forced
+  kill never loses progress; segments resume from their recorded offsets.
+- **Self-contained test strategy**: every feature lands with a `--self-test-*`
+  flag (see below) so the same binary that runs on your desk runs on CI.
+
 ## 📄 License
 
-TBD — not chosen yet.
+Proprietary — **all rights reserved** (no license file, no grant of use).
+You may browse, fork-for-review and run the app yourself, but you may **not**
+redistribute, sell, or reuse this code (in whole or in part, including in
+derivative or closed-source projects) without written permission from the
+author.
+
+Before contributing, read the license note above: by opening a pull request
+you agree that your contribution is offered under the same terms.
