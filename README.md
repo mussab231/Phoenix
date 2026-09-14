@@ -8,7 +8,7 @@ Goal: match — then surpass — Internet Download Manager.
 
 ---
 
-## ✨ Features (v0.4)
+## ✨ Features (v0.5)
 
 | Feature | Status |
 |---------|--------|
@@ -16,11 +16,12 @@ Goal: match — then surpass — Internet Download Manager.
 | Automatic resume after pause / crash / network loss (`.phoenix-state`) | ✅ |
 | Download queue: several files at once, configurable concurrency (1–5) | ✅ |
 | Per-download pause / resume / remove, live speed per item | ✅ |
+| Scheduler: start a download at a chosen date/time (queued as "Scheduled …") | ✅ |
+| When done: sleep / hibernate / shutdown the PC automatically | ✅ |
 | Smart fallback to single connection when server ignores `Range` | ✅ |
 | Qt GUI: queue table, per-row progress, Add dialog | ✅ |
 | Byte-for-byte verified downloads (segmented == single-connection) | ✅ |
-| Headless self-tests (`--self-test`, `--self-test-mt`, `--self-test-resume`, `--self-test-queue`) | ✅ |
-| Scheduler + auto-shutdown on completion | 🔜 v0.5 |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`) | ✅ |
 | Speed limiter + smart retry | 🔜 v0.6 |
 | Browser integration (link catching) | 🔜 v0.7 |
 
@@ -43,11 +44,13 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 ## ▶️ Run
 
 ```powershell
-.\build\Phoenix.exe                    # GUI (queue table)
+.\build\Phoenix.exe                    # GUI (queue table + scheduler + power actions)
 .\build\Phoenix.exe --self-test        # quick HEAD + GET smoke test
 .\build\Phoenix.exe --self-test-mt     # 10 MB over 8 connections + content check
 .\build\Phoenix.exe --self-test-resume # forced cancel at ~2 MB, then resume
 .\build\Phoenix.exe --self-test-queue  # two downloads at once through the queue
+.\build\Phoenix.exe --self-test-schedule # starts a download at +2.5s (verifies it waits)
+.\build\Phoenix.exe --self-test-sleep  # queue finishes -> "sleep" action fires (no-op in test)
 ```
 
 ## 🗂️ Project layout
@@ -61,7 +64,8 @@ Phoenix/
 │   │   ├── HttpClient.*      # WinHTTP wrapper (size probe, GET, Range, segments)
 │   │   ├── ResumeStore.*     # .phoenix-state persistence (pause/crash recovery)
 │   │   ├── DownloadEngine.*  # one download on a worker thread + Qt signals
-│   │   └── DownloadQueue.*   # coordinates several engines (concurrency limit)
+│   │   ├── DownloadQueue.*   # coordinates several engines (concurrency limit, scheduler)
+│   │   └── PowerControl.*    # sleep / hibernate / shutdown (test mode built in)
 │   ├── models/
 │   │   ├── DownloadTask.h
 │   │   └── DownloadItem.h    # one queue entry

@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 
+class QComboBox;
 class QProgressBar;
 class QPushButton;
 class QSpinBox;
@@ -32,6 +33,7 @@ private:
 
     QTableWidget* m_table = nullptr;
     QSpinBox* m_maxBox = nullptr;
+    QComboBox* m_doneBox = nullptr;
     QPushButton* m_addBtn = nullptr;
     QPushButton* m_pauseBtn = nullptr;
     QPushButton* m_resumeBtn = nullptr;

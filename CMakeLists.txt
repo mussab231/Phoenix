@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Phoenix VERSION 0.4.0 LANGUAGES CXX)
+project(Phoenix VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,9 +20,10 @@ add_executable(Phoenix
     src/core/ResumeStore.cpp
     src/core/DownloadEngine.cpp
     src/core/DownloadQueue.cpp
+    src/core/PowerControl.cpp
     src/gui/MainWindow.cpp
     src/gui/AddDialog.cpp
 )
 
 target_include_directories(Phoenix PRIVATE src)
-target_link_libraries(Phoenix PRIVATE Qt6::Widgets winhttp)
+target_link_libraries(Phoenix PRIVATE Qt6::Widgets winhttp powrprof)

@@ -1,5 +1,7 @@
 #include "gui/AddDialog.h"
 
+#include <QCheckBox>
+#include <QDateTimeEdit>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -11,7 +13,7 @@
 
 AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("Add download"));
-    resize(480, 160);
+    resize(520, 200);
 
     auto* layout = new QVBoxLayout(this);
     auto* form = new QFormLayout();
@@ -33,6 +35,16 @@ AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
     m_segmentsBox->setRange(1, 16);
     m_segmentsBox->setValue(8);
     form->addRow(QStringLiteral("Connections:"), m_segmentsBox);
+
+    m_scheduleCheck = new QCheckBox(QStringLiteral("Start later"), this);
+    m_scheduleEdit =
+        new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600), this);
+    m_scheduleEdit->setCalendarPopup(true);
+    m_scheduleEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+    m_scheduleEdit->setEnabled(false);
+    connect(m_scheduleCheck, &QCheckBox::toggled, m_scheduleEdit,
+            &QWidget::setEnabled);
+    form->addRow(m_scheduleCheck, m_scheduleEdit);
 
     layout->addLayout(form);
 
@@ -59,6 +71,14 @@ QString AddDialog::outputPath() const {
 
 int AddDialog::segments() const {
     return m_segmentsBox->value();
+}
+
+bool AddDialog::isScheduled() const {
+    return m_scheduleCheck->isChecked();
+}
+
+qint64 AddDialog::scheduledAt() const {
+    return m_scheduleEdit->dateTime().toMSecsSinceEpoch();
 }
 
 void AddDialog::onBrowse() {

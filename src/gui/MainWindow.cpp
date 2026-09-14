@@ -4,6 +4,7 @@
 #include "gui/AddDialog.h"
 #include "models/DownloadItem.h"
 
+#include <QComboBox>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -24,8 +25,8 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.4"));
-    resize(760, 420);
+    setWindowTitle(QStringLiteral("Phoenix 0.5"));
+    resize(780, 440);
 
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
@@ -45,6 +46,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_maxBox->setRange(1, 5);
     m_maxBox->setValue(3);
     topRow->addWidget(m_maxBox);
+    topRow->addSpacing(12);
+    topRow->addWidget(new QLabel(QStringLiteral("When done:"), central));
+    m_doneBox = new QComboBox(central);
+    m_doneBox->addItems({QStringLiteral("Do nothing"), QStringLiteral("Sleep"),
+                         QStringLiteral("Hibernate"), QStringLiteral("Shutdown")});
+    topRow->addWidget(m_doneBox);
     layout->addLayout(topRow);
 
     m_table = new QTableWidget(0, 5, central);
@@ -65,6 +72,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
     connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
             &DownloadQueue::setMaxConcurrent);
+    connect(m_doneBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            m_queue, &DownloadQueue::setAutoAction);
     connect(m_queue, &DownloadQueue::itemAdded, this, &MainWindow::onItemAdded);
     connect(m_queue, &DownloadQueue::itemChanged, this, &MainWindow::onItemChanged);
     connect(m_queue, &DownloadQueue::itemRemoved, this, &MainWindow::onItemRemoved);
@@ -75,7 +84,7 @@ void MainWindow::onAdd() {
     if (dlg.exec() != QDialog::Accepted)
         return;
     m_queue->addDownload(dlg.url().toStdString(), dlg.outputPath().toStdString(),
-                         dlg.segments());
+                         dlg.segments(), dlg.isScheduled() ? dlg.scheduledAt() : 0);
 }
 
 void MainWindow::onPause() {

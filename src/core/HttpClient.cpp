@@ -60,7 +60,7 @@ UrlParts crackUrl(const std::string& url) {
 class Session {
 public:
     explicit Session(const UrlParts& parts) {
-        hSession_ = WinHttpOpen(L"Phoenix/0.3",
+        hSession_ = WinHttpOpen(L"Phoenix/0.5",
                                 WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession_)

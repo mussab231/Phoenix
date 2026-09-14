@@ -11,6 +11,7 @@ struct DownloadItem {
     std::string url;
     std::string outputPath;
     int segments = 8;
+    std::int64_t scheduledAt = 0; // epoch millis; 0 = start as soon as possible
     DownloadState state = DownloadState::Idle;
     std::int64_t totalBytes = -1;
     std::int64_t receivedBytes = 0;

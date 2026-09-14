@@ -3,20 +3,29 @@
 #include "core/DownloadEngine.h"
 
 #include <QDateTime>
+#include <QTimer>
 
-DownloadQueue::DownloadQueue(QObject* parent) : QObject(parent) {}
+DownloadQueue::DownloadQueue(QObject* parent) : QObject(parent) {
+    m_pumpTimer = new QTimer(this);
+    m_pumpTimer->setInterval(1000);
+    connect(m_pumpTimer, &QTimer::timeout, this, &DownloadQueue::onTick);
+    m_pumpTimer->start();
+}
 
 int DownloadQueue::addDownload(const std::string& url, const std::string& outputPath,
-                               int segments) {
+                               int segments, std::int64_t startAtMs) {
     DownloadItem item;
     item.id = m_nextId++;
     item.url = url;
     item.outputPath = outputPath;
     item.segments = segments < 1 ? 1 : (segments > 16 ? 16 : segments);
+    if (startAtMs > 0)
+        item.scheduledAt = startAtMs;
     item.state = DownloadState::Idle;
     item.statusText = "Queued";
     m_items.push_back(item);
     m_finishNotified = false;
+    m_autoActionDone = false;
     emit itemAdded(item.id);
     pump();
     return item.id;
@@ -75,6 +84,32 @@ void DownloadQueue::setMaxConcurrent(int n) {
     if (n > 5)
         n = 5;
     m_maxConcurrent = n;
+    pump();
+}
+
+void DownloadQueue::setAutoAction(int action) {
+    if (action < static_cast<int>(PowerControl::Action::None))
+        action = static_cast<int>(PowerControl::Action::None);
+    if (action > static_cast<int>(PowerControl::Action::Shutdown))
+        action = static_cast<int>(PowerControl::Action::Shutdown);
+    m_autoAction = action;
+}
+
+void DownloadQueue::onTick() {
+    const std::int64_t now = QDateTime::currentMSecsSinceEpoch();
+    for (auto& item : m_items) {
+        if (item.state == DownloadState::Idle && item.scheduledAt > 0 &&
+            !m_runners.count(item.id) && item.scheduledAt > now) {
+            std::string text = "Scheduled " +
+                QDateTime::fromMSecsSinceEpoch(item.scheduledAt)
+                    .toString(QStringLiteral("HH:mm"))
+                    .toStdString();
+            if (item.statusText != text) {
+                item.statusText = text;
+                emit itemChanged(item.id);
+            }
+        }
+    }
     pump();
 }
 
@@ -151,10 +186,13 @@ void DownloadQueue::onItemCancelled(int id) {
 }
 
 void DownloadQueue::pump() {
+    const std::int64_t now = QDateTime::currentMSecsSinceEpoch();
     while (static_cast<int>(m_runners.size()) < m_maxConcurrent) {
         DownloadItem* next = nullptr;
         for (auto& item : m_items) {
             if (item.state == DownloadState::Idle && !m_runners.count(item.id)) {
+                if (item.scheduledAt > 0 && item.scheduledAt > now)
+                    continue; // whose time has not come yet
                 next = &item;
                 break;
             }
@@ -188,11 +226,19 @@ void DownloadQueue::checkFinished() {
     if (m_finishNotified)
         return;
     for (const auto& item : m_items) {
-        if (item.state == DownloadState::Running || item.state == DownloadState::Idle)
+        // Paused items are user-initiated stops: the queue is not done yet.
+        if (item.state == DownloadState::Running || item.state == DownloadState::Idle ||
+            item.state == DownloadState::Paused)
             return;
     }
     m_finishNotified = true;
     emit queueFinished();
+    if (m_autoAction != static_cast<int>(PowerControl::Action::None) &&
+        !m_autoActionDone) {
+        m_autoActionDone = true;
+        emit autoActionTriggered(m_autoAction);
+        PowerControl::perform(static_cast<PowerControl::Action>(m_autoAction));
+    }
 }
 
 DownloadItem* DownloadQueue::find(int id) {

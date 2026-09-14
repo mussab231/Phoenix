@@ -1,5 +1,6 @@
 #include "core/DownloadQueue.h"
 #include "core/HttpClient.h"
+#include "core/PowerControl.h"
 #include "gui/MainWindow.h"
 #include "models/DownloadItem.h"
 
@@ -7,6 +8,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QTimer>
 
 #include <atomic>
@@ -73,7 +75,7 @@ int runSelfTest() {
 // against a classic single-connection reference download.
 int runMultiSegmentTest() {
     try {
-        const std::string url = "https://cachefly.cachefly.net/10mb.test";
+        const std::string url = "https://proof.ovh.net/files/10Mb.dat";
         const std::int64_t expected = 10LL * 1024 * 1024;
 
         std::string out = tempFile("phoenix_selftest_mt.bin");
@@ -129,7 +131,7 @@ int runMultiSegmentTest() {
 
 // Resume test: force-cancel at ~2 MB, then resume the same call to completion.
 int runResumeTest() {
-    const std::string url = "https://cachefly.cachefly.net/10mb.test";
+    const std::string url = "https://proof.ovh.net/files/10Mb.dat";
     const std::int64_t expected = 10LL * 1024 * 1024;
     const std::string out = tempFile("phoenix_resume.bin");
     const std::string state = out + ".phoenix-state";
@@ -215,7 +217,7 @@ int runQueueTest() {
     QCoreApplication app(argc, argv);
 
     const std::string smallUrl = "https://example.com/";
-    const std::string bigUrl = "https://cachefly.cachefly.net/10mb.test";
+    const std::string bigUrl = "https://proof.ovh.net/files/10Mb.dat";
     const std::int64_t bigExpected = 10LL * 1024 * 1024;
     const std::string smallOut = tempFile("phoenix_q1.html");
     const std::string bigOut = tempFile("phoenix_q2.bin");
@@ -275,6 +277,131 @@ int runQueueTest() {
     return 0;
 }
 
+// Scheduler test: a download is told to start +2.5s; it must sit as
+// "Scheduled", not move a byte early, and only go Running after its time.
+int runScheduleTest() {
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    DownloadQueue queue;
+    queue.setMaxConcurrent(1);
+
+    const std::string url = "https://example.com/";
+    const std::string out = tempFile("phoenix_sched.html");
+    std::remove(out.c_str());
+    std::remove((out + ".phoenix-state").c_str());
+
+    const std::int64_t windowMs = 2500;
+    const std::int64_t scheduledAt = QDateTime::currentMSecsSinceEpoch() + windowMs;
+
+    bool timedOut = false;
+    bool sawScheduledStatus = false;
+    std::int64_t startedMs = -1;
+    int id = -1;
+
+    QObject::connect(&queue, &DownloadQueue::itemAdded, [&](int nid) {
+        id = nid;
+        std::printf("SCHEDULE-TEST: item %d queued for start in +%.1fs\n", id,
+                    windowMs / 1000.0);
+    });
+    QObject::connect(&queue, &DownloadQueue::itemChanged, [&](int cid) {
+        if (cid != id)
+            return;
+        for (const auto& it : queue.items()) {
+            if (it.id != id)
+                continue;
+            if (it.state == DownloadState::Idle &&
+                it.statusText.find("Scheduled") != std::string::npos)
+                sawScheduledStatus = true;
+            if (it.state == DownloadState::Running && startedMs < 0)
+                startedMs = QDateTime::currentMSecsSinceEpoch();
+            std::printf("\rSCHED %lld/%lld %s   ",
+                        static_cast<long long>(it.receivedBytes),
+                        static_cast<long long>(it.totalBytes), it.statusText.c_str());
+            break;
+        }
+    });
+    QObject::connect(&queue, &DownloadQueue::queueFinished, &app,
+                     &QCoreApplication::quit);
+    QTimer::singleShot(30000, &app, [&] {
+        timedOut = true;
+        QCoreApplication::quit();
+    });
+
+    id = queue.addDownload(url, out, 1, scheduledAt);
+    app.exec();
+    std::printf("\n");
+
+    if (timedOut) {
+        std::printf("SCHEDULE-TEST FAILED: timed out\n");
+        return 1;
+    }
+    bool completed = false;
+    for (const auto& it : queue.items())
+        if (it.id == id && it.state == DownloadState::Completed)
+            completed = true;
+    std::int64_t size = diskSize(out);
+    double startedAfter = startedMs > 0
+                              ? (startedMs - (scheduledAt - windowMs)) / 1000.0
+                              : -1.0;
+    std::printf("Scheduled status shown: %s, started at +%.2fs (window +%.1fs), "
+                "size: %lld bytes\n",
+                sawScheduledStatus ? "YES" : "NO", startedAfter,
+                windowMs / 1000.0, static_cast<long long>(size));
+    if (!sawScheduledStatus || !completed || size <= 0 ||
+        (startedMs > 0 && startedMs < scheduledAt)) {
+        std::printf("SCHEDULE-TEST FAILED: item ran before its time or never ran\n");
+        return 1;
+    }
+    std::printf("SCHEDULE-TEST OK -> %s\n", out.c_str());
+    return 0;
+}
+
+// Auto-action test: queue finishes -> "sleep" auto action fires. Power control
+// is in test mode, so nothing actually suspends the machine.
+int runSleepTest() {
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    DownloadQueue queue;
+    queue.setMaxConcurrent(1);
+    PowerControl::g_testMode = true;
+    queue.setAutoAction(static_cast<int>(PowerControl::Action::Sleep));
+
+    const std::string out = tempFile("phoenix_sleep.html");
+    std::remove(out.c_str());
+
+    bool timedOut = false;
+    bool triggerOk = false;
+    QObject::connect(&queue, &DownloadQueue::autoActionTriggered, [&](int action) {
+        triggerOk = (action == static_cast<int>(PowerControl::Action::Sleep));
+        std::printf("SLEEP-TEST: auto action fired (action=%d)\n", action);
+        QCoreApplication::quit();
+    });
+    QTimer::singleShot(30000, &app, [&] {
+        timedOut = true;
+        QCoreApplication::quit();
+    });
+
+    queue.addDownload("https://example.com/", out, 1);
+    app.exec();
+
+    std::int64_t size = diskSize(out);
+    std::printf("Sleep file size: %lld, trigger ok: %s\n",
+                static_cast<long long>(size), triggerOk ? "YES" : "NO");
+    PowerControl::g_testMode = false;
+    if (timedOut || !triggerOk || size <= 0) {
+        std::printf("SLEEP-TEST FAILED\n");
+        return 1;
+    }
+    std::printf("SLEEP-TEST OK\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -286,6 +413,10 @@ int main(int argc, char** argv) {
             return runResumeTest();
         if (arg == "--self-test-queue")
             return runQueueTest();
+        if (arg == "--self-test-schedule")
+            return runScheduleTest();
+        if (arg == "--self-test-sleep")
+            return runSleepTest();
     }
     QApplication app(argc, argv);
     MainWindow w;

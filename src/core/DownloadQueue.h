@@ -2,6 +2,7 @@
 
 #include "models/DownloadItem.h"
 #include "core/DownloadEngine.h" // complete type: ActiveRunner owns an engine
+#include "core/PowerControl.h"
 
 #include <QElapsedTimer>
 #include <QObject>
@@ -11,21 +12,27 @@
 #include <string>
 #include <vector>
 
+class QTimer;
+
 // Coordinates several DownloadEngines: up to N run at once, the rest wait
 // in line. Each download keeps its own resume state, so pausing, closing,
-// or crashing never loses progress.
+// or crashing never loses progress. Items can also be scheduled to start at
+// a fixed time, and an optional power action fires once the whole queue is
+// done (sleep / hibernate / shutdown).
 class DownloadQueue : public QObject {
     Q_OBJECT
 public:
     explicit DownloadQueue(QObject* parent = nullptr);
 
+    // startAtMs = epoch milliseconds; 0 (default) starts right away.
     int addDownload(const std::string& url, const std::string& outputPath,
-                    int segments = 8);
+                    int segments = 8, std::int64_t startAtMs = 0);
     void pauseDownload(int id);
     void resumeDownload(int id);
     void removeDownload(int id);
     void setMaxConcurrent(int n);
     int maxConcurrent() const { return m_maxConcurrent; }
+    void setAutoAction(int action); // PowerControl::Action
     std::vector<DownloadItem> items() const { return m_items; }
 
 signals:
@@ -33,6 +40,10 @@ signals:
     void itemChanged(int id);
     void itemRemoved(int id);
     void queueFinished(); // nothing running or waiting anymore
+    void autoActionTriggered(int action); // helper for tests / UI logging
+
+private slots:
+    void onTick(); // 1 Hz pump: starts scheduled items whose time arrived
 
 private:
     struct ActiveRunner {
@@ -57,4 +68,7 @@ private:
     int m_nextId = 1;
     int m_maxConcurrent = 3;
     bool m_finishNotified = false;
+    QTimer* m_pumpTimer = nullptr;
+    int m_autoAction = static_cast<int>(PowerControl::Action::None);
+    bool m_autoActionDone = false;
 };
