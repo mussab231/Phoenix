@@ -6,7 +6,7 @@
 
 namespace {
 
-constexpr char kMagic[] = "PHX1";
+constexpr char kMagic[] = "PHX2";
 
 bool parseInt64(const std::string& s, std::int64_t& out) {
     try {
@@ -55,10 +55,10 @@ std::optional<ResumeData> ResumeStore::load(const std::string& statePath) {
         return std::nullopt;
     std::int64_t count = 0;
     if (!std::getline(in, line) || !parseInt64(line, count) || count < 1 ||
-        count > 16)
+        count > 1000000)
         return std::nullopt;
 
-    data.segments.reserve(static_cast<size_t>(count));
+    data.segments.reserve(std::min<int64_t>(count, 4096));
     for (std::int64_t i = 0; i < count; ++i) {
         if (!std::getline(in, line))
             return std::nullopt;

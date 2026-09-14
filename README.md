@@ -3,7 +3,6 @@
 [![CI](https://github.com/mussab231/Phoenix/actions/workflows/ci.yml/badge.svg)](https://github.com/mussab231/Phoenix/actions/workflows/ci.yml)
 
 A fast **multi-segment download manager for Windows**, built with **C++17**, **WinHTTP** and **Qt6**.
-Goal: match — then surpass — Internet Download Manager.
 
 > 🇸🇾 **بالعربي:** برنامج تحميل سريع لويندوز، بيقسّم الملف لعدة مقاطع وبيحمّلها بالتوازي،
 > وبيدعم الاستكمال بعد الإيقاف أو انقطاع النت، مع قائمة تحميلات متعددة. مكتوب بلغة C++ ومبني على WinHTTP وQt6.

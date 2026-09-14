@@ -93,6 +93,12 @@ public:
     Session& operator=(const Session&) = delete;
 
     HINTERNET openRequest(const UrlParts& parts, const wchar_t* method) {
+        // Reuse one Session across many chunk requests on the same worker
+        // thread: close the previous request handle before opening a new one.
+        if (hRequest_) {
+            WinHttpCloseHandle(hRequest_);
+            hRequest_ = nullptr;
+        }
         DWORD flags = parts.secure ? WINHTTP_FLAG_SECURE : 0;
         hRequest_ = WinHttpOpenRequest(hConnect_, method, parts.path.c_str(),
                                        nullptr, WINHTTP_NO_REFERER,
@@ -163,6 +169,79 @@ void sleepInterruptible(int ms, const std::atomic<bool>* stopFlag) {
         std::this_thread::sleep_for(
             std::chrono::milliseconds(std::min(left, 50)));
     }
+}
+
+// Dynamic re-segmentation works in atomic chunks claimed from a shared cursor.
+// Per-chunk request overhead is kept low while still balancing fast vs slow
+// connections, so cap between 256 KiB and 4 MiB.
+constexpr std::int64_t kMinChunkBytes = 256LL * 1024;
+constexpr std::int64_t kMaxChunkBytes = 4LL * 1024 * 1024;
+
+// Streams exactly [from, to] of url into outputPath at file offset `from`,
+// using a persistent Session so consecutive chunks on the same worker thread
+// reuse the TCP/TLS connection. Returns the number of bytes written (which
+// must equal to-from+1, or the server cut the reply short and the caller
+// retries). Throws on failure/cancellation.
+std::int64_t streamRange(Session& session, const UrlParts& parts,
+                         const std::string& outputPath,
+                         const std::atomic<bool>* stopFlag, std::int64_t from,
+                         std::int64_t to, RateLimiter* limiter) {
+    if (HttpClient::g_testFakeFailures.load(std::memory_order_relaxed) > 0 &&
+        HttpClient::g_testFakeFailures.fetch_sub(1) > 0)
+        throw std::runtime_error("simulated transient error");
+
+    HINTERNET hRequest = session.openRequest(parts, L"GET");
+    std::wstring range = L"Range: bytes=" + std::to_wstring(from) + L"-" +
+                         std::to_wstring(to);
+    if (!WinHttpAddRequestHeaders(hRequest, range.c_str(), static_cast<DWORD>(-1),
+                                  WINHTTP_ADDREQ_FLAG_ADD))
+        fail("Range header failed");
+    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+        fail("GET send failed");
+    if (!WinHttpReceiveResponse(hRequest, nullptr))
+        fail("GET response failed");
+
+    DWORD status = queryStatus(hRequest);
+    if (status != 206) {
+        if (status == 200)
+            throw std::runtime_error("Server ignored Range request");
+        throw std::runtime_error("GET request returned HTTP " +
+                                 std::to_string(status));
+    }
+
+    std::ofstream out(outputPath, std::ios::binary | std::ios::in | std::ios::out);
+    if (!out.is_open())
+        throw std::runtime_error("Cannot open output file: " + outputPath);
+    out.seekp(static_cast<std::streamoff>(from));
+    if (!out)
+        throw std::runtime_error("Cannot seek output file: " + outputPath);
+
+    std::vector<char> chunk(64 * 1024);
+    std::int64_t written = 0;
+    DWORD available = 0;
+    while (WinHttpQueryDataAvailable(hRequest, &available) && available > 0) {
+        if (stopFlag && stopFlag->load())
+            throw std::runtime_error("cancelled");
+        DWORD toRead = available > chunk.size() ? static_cast<DWORD>(chunk.size())
+                                                : available;
+        DWORD got = 0;
+        if (!WinHttpReadData(hRequest, chunk.data(), toRead, &got) || got == 0)
+            break;
+        if (limiter && !limiter->consume(got, stopFlag))
+            throw std::runtime_error("cancelled");
+        out.write(chunk.data(), got);
+        if (!out)
+            throw std::runtime_error("Disk write failed");
+        written += got;
+    }
+    out.close();
+
+    if (stopFlag && stopFlag->load())
+        throw std::runtime_error("cancelled");
+    if (written != to - from + 1)
+        throw std::runtime_error("short read"); // transient: caller retries
+    return written;
 }
 
 } // namespace
@@ -306,38 +385,46 @@ void HttpClient::segmentedCore(const std::string& url,
     if (total < numSegments)
         numSegments = static_cast<int>(total);
 
-    // Segment boundaries are deterministic so a later run lines up exactly.
-    std::vector<std::int64_t> segStart(static_cast<size_t>(numSegments));
-    std::vector<std::int64_t> segEnd(static_cast<size_t>(numSegments));
-    for (int i = 0; i < numSegments; ++i) {
-        segStart[static_cast<size_t>(i)] = i * total / numSegments;
-        segEnd[static_cast<size_t>(i)] = (i + 1) * total / numSegments - 1;
-    }
+    // Dynamic re-segmentation: no fixed per-connection ranges. A per-launch
+    // chunk size keeps request overhead low, and a shared cursor hands each
+    // idle connection the next unclaimed chunk, so a fast connection that
+    // finished its share automatically takes over the remaining bytes of a
+    // slow one. No empty slot ever goes unused, no queue waits for a straggler.
+    const std::int64_t chunkBytes = std::min(
+        std::max(total / (numSegments * 4), kMinChunkBytes), kMaxChunkBytes);
+    const std::int64_t numSlots = (total + chunkBytes - 1) / chunkBytes;
+    std::vector<std::atomic<std::uint8_t>> done(static_cast<size_t>(numSlots));
 
-    // Try to resume from a previous run.
-    std::vector<std::atomic<std::int64_t>> segDone(
-        static_cast<size_t>(numSegments));
+    // Try to resume the completed byte-ranges from a previous run.
     bool resuming = false;
+    std::int64_t initial = 0;
     if (auto saved = ResumeStore::load(statePath)) {
         bool ok = saved->url == url && saved->total == total &&
-                  saved->segments.size() == static_cast<size_t>(numSegments) &&
                   fileSizeOnDisk(outputPath) == total;
-        for (int i = 0; ok && i < numSegments; ++i) {
-            const SegmentState& s = saved->segments[static_cast<size_t>(i)];
-            ok = s.start == segStart[static_cast<size_t>(i)] &&
-                 s.end == segEnd[static_cast<size_t>(i)];
-        }
         if (ok) {
-            for (int i = 0; i < numSegments; ++i)
-                segDone[static_cast<size_t>(i)].store(
-                    saved->segments[static_cast<size_t>(i)].done);
-            resuming = true;
-        } else {
-            ResumeStore::remove(statePath); // stale/mismatched: start fresh
+            for (const auto& s : saved->segments) {
+                std::int64_t fs = s.start / chunkBytes;
+                std::int64_t fe = s.end / chunkBytes;
+                for (std::int64_t slot = fs; slot <= fe && slot < numSlots;
+                     ++slot) {
+                    std::int64_t slotStart = slot * chunkBytes;
+                    std::int64_t slotEnd = std::min(slotStart + chunkBytes - 1,
+                                                    total - 1);
+                    if (s.start <= slotStart && s.end >= slotEnd) {
+                        done[static_cast<size_t>(slot)].store(1);
+                        initial += slotEnd - slotStart + 1;
+                    }
+                }
+            }
         }
+        resuming = true;
+        if (initial == 0)
+            resuming = false; // nothing usable in the state file
     }
     if (!resuming) {
-        // Preallocate so every segment can write at its own offset safely.
+        initial = 0;
+        ResumeStore::remove(statePath); // stale/mismatched: start fresh
+        // Preallocate so every chunk can write at its own offset safely.
         std::ofstream pre(outputPath, std::ios::binary | std::ios::trunc);
         if (!pre.is_open())
             throw std::runtime_error("Cannot open output file: " + outputPath);
@@ -353,9 +440,7 @@ void HttpClient::segmentedCore(const std::string& url,
             throw std::runtime_error("Failed to preallocate output file (size)");
     }
 
-    std::int64_t initial = 0;
-    for (int i = 0; i < numSegments; ++i)
-        initial += segDone[static_cast<size_t>(i)].load();
+    std::atomic<std::int64_t> next{0};    // next unclaimed byte offset
     std::atomic<std::int64_t> agg{initial};
     if (progress)
         progress(initial, total);
@@ -364,14 +449,26 @@ void HttpClient::segmentedCore(const std::string& url,
         ResumeData rd;
         rd.url = url;
         rd.total = total;
-        rd.segments.reserve(static_cast<size_t>(numSegments));
-        for (int i = 0; i < numSegments; ++i) {
+        rd.segments.reserve(static_cast<size_t>(numSlots / 64) + 16);
+        std::int64_t runStart = -1;
+        auto flushRun = [&](std::int64_t lastSlot) {
             SegmentState s;
-            s.start = segStart[static_cast<size_t>(i)];
-            s.end = segEnd[static_cast<size_t>(i)];
-            s.done = segDone[static_cast<size_t>(i)].load();
+            s.start = runStart * chunkBytes;
+            s.end = std::min(lastSlot * chunkBytes + chunkBytes - 1, total - 1);
+            s.done = s.end - s.start + 1;
             rd.segments.push_back(s);
+            runStart = -1;
+        };
+        for (std::int64_t slot = 0; slot < numSlots; ++slot) {
+            if (done[static_cast<size_t>(slot)].load()) {
+                if (runStart < 0)
+                    runStart = slot;
+            } else if (runStart >= 0) {
+                flushRun(slot - 1);
+            }
         }
+        if (runStart >= 0)
+            flushRun(numSlots - 1);
         ResumeStore::save(statePath, rd);
     };
 
@@ -392,48 +489,49 @@ void HttpClient::segmentedCore(const std::string& url,
     std::mutex errMutex;
     std::exception_ptr firstError;
 
-    // Per-segment retries inside one pass: up to kSegAttempts, exponential backoff.
-    constexpr int kSegAttempts = 4;
-    constexpr int kSegBaseDelayMs = 1000;
+    // Per-chunk retries: up to kChunkAttempts, exponential backoff. The
+    // caller retries the whole call if the state file lets a later pass
+    // continue where this one left off.
+    constexpr int kChunkAttempts = 4;
+    constexpr int kChunkBaseDelayMs = 1000;
 
-    auto worker = [&](int i) {
+    auto worker = [&](int) {
         try {
-            std::int64_t from = segStart[static_cast<size_t>(i)] +
-                                segDone[static_cast<size_t>(i)].load();
-            if (from > segEnd[static_cast<size_t>(i)])
-                return; // segment already complete
-
-            std::int64_t attempt = 1;
+            UrlParts parts = crackUrl(url);
+            Session session(parts); // one persistent connection per worker
             for (;;) {
-                try {
-                    std::int64_t last = from;
-                    download(url, outputPath,
-                             [&](std::int64_t cur, std::int64_t) {
-                                 std::int64_t delta = cur - last;
-                                 last = cur;
-                                 if (delta > 0) {
-                                     segDone[static_cast<size_t>(i)].fetch_add(delta);
-                                     if (progress)
-                                         progress(agg.fetch_add(delta) + delta, total);
-                                 }
-                             },
-                             stopFlag, from, segEnd[static_cast<size_t>(i)], from,
-                             false, limiter); // never truncate the shared file
-                    return;                    // segment finished
-                } catch (const std::exception& e) {
-                    bool stopped = stopFlag && stopFlag->load();
-                    if (stopped)
-                        throw; // user cancel: propagate immediately
-                    if (attempt >= kSegAttempts || !isTransient(e.what()))
-                        throw;
-                    sleepInterruptible(kSegBaseDelayMs * (1 << (attempt - 1)),
-                                       stopFlag);
-                    // Resume from the byte recorded in segDone.
-                    from = segStart[static_cast<size_t>(i)] +
-                           segDone[static_cast<size_t>(i)].load();
-                    if (from > segEnd[static_cast<size_t>(i)])
-                        return;
-                    ++attempt;
+                if (stopFlag && stopFlag->load())
+                    throw std::runtime_error("cancelled");
+                std::int64_t pos = next.fetch_add(chunkBytes);
+                if (pos >= total)
+                    break;
+                std::int64_t end = std::min(pos + chunkBytes - 1, total - 1);
+                size_t slot = static_cast<size_t>(pos / chunkBytes);
+                if (done[slot].load())
+                    continue; // already fetched on a previous run
+                std::int64_t attempt = 1;
+                for (;;) {
+                    try {
+                        streamRange(session, parts, outputPath, stopFlag, pos,
+                                    end, limiter);
+                        done[slot].store(1);
+                        std::int64_t len = end - pos + 1;
+                        if (progress)
+                            progress(agg.fetch_add(len) + len, total);
+                        break;
+                    } catch (const std::exception& e) {
+                        bool stopped = stopFlag && stopFlag->load();
+                        if (stopped)
+                            throw; // user cancel: propagate immediately
+                        if (attempt >= kChunkAttempts ||
+                            !isTransient(e.what()))
+                            throw;
+                        sleepInterruptible(
+                            kChunkBaseDelayMs * (1 << (attempt - 1)), stopFlag);
+                        if (stopFlag && stopFlag->load())
+                            throw std::runtime_error("cancelled");
+                        ++attempt;
+                    }
                 }
             }
         } catch (...) {

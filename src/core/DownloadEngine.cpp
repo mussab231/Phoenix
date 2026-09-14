@@ -59,8 +59,7 @@ void DownloadEngine::run(DownloadTask task) {
             // Peek at saved state to report "Resuming" honestly.
             QString phase = QStringLiteral("Downloading (%1 connections)...").arg(m_segments);
             if (auto saved = ResumeStore::load(ResumeStore::statePathFor(task.outputPath))) {
-                if (saved->url == task.url && saved->total == task.totalBytes &&
-                    static_cast<int>(saved->segments.size()) == m_segments) {
+                if (saved->url == task.url && saved->total == task.totalBytes) {
                     std::int64_t done = 0;
                     for (const auto& s : saved->segments)
                         done += s.done;

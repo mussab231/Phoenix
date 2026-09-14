@@ -26,9 +26,11 @@ public:
 
     // startAtMs = epoch milliseconds; 0 (default) starts right away.
     // maxSpeedBps = per-download speed cap; 0 = unlimited.
+    // startPaused = true restores an item in the Paused state instead of
+    // letting the queue start it (used when reloading a saved session).
     int addDownload(const std::string& url, const std::string& outputPath,
                     int segments = 8, std::int64_t startAtMs = 0,
-                    double maxSpeedBps = 0.0);
+                    double maxSpeedBps = 0.0, bool startPaused = false);
     void pauseDownload(int id);
     void resumeDownload(int id);
     void removeDownload(int id);

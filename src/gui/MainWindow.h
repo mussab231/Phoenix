@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 
+#include <string>
+
 class QComboBox;
 class QProgressBar;
 class QPushButton;
@@ -10,6 +12,7 @@ class QSystemTrayIcon;
 class QTableWidget;
 class QMenu;
 class QAction;
+class QTimer;
 class ClipboardWatcher;
 class DownloadQueue;
 class SettingsStore;
@@ -46,6 +49,8 @@ private:
     int selectedId() const;
     void updateRow(int id);
     void refreshStatus();
+    void restoreSession();
+    void saveSession();
     void setupTray();
     void applySettingsToUi();
     static QString formatSize(qint64 bytes);

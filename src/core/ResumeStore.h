@@ -14,6 +14,10 @@ struct SegmentState {
 struct ResumeData {
     std::string url;
     std::int64_t total = -1;
+    // With dynamic re-segmentation there are no fixed per-connection ranges;
+    // instead each entry is one COMPLETE byte range [start,end] (done ==
+    // end-start+1) that has already been written. The next run re-fetches
+    // only the gaps.
     std::vector<SegmentState> segments;
 };
 

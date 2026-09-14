@@ -14,7 +14,7 @@ DownloadQueue::DownloadQueue(QObject* parent) : QObject(parent) {
 
 int DownloadQueue::addDownload(const std::string& url, const std::string& outputPath,
                                int segments, std::int64_t startAtMs,
-                               double maxSpeedBps) {
+                               double maxSpeedBps, bool startPaused) {
     DownloadItem item;
     item.id = m_nextId++;
     item.url = url;
@@ -23,13 +23,14 @@ int DownloadQueue::addDownload(const std::string& url, const std::string& output
     item.maxSpeedBps = maxSpeedBps < 0.0 ? 0.0 : maxSpeedBps;
     if (startAtMs > 0)
         item.scheduledAt = startAtMs;
-    item.state = DownloadState::Idle;
-    item.statusText = "Queued";
+    item.state = startPaused ? DownloadState::Paused : DownloadState::Idle;
+    item.statusText = startPaused ? "Paused" : "Queued";
     m_items.push_back(item);
     m_finishNotified = false;
     m_autoActionDone = false;
     emit itemAdded(item.id);
-    pump();
+    if (!startPaused)
+        pump();
     return item.id;
 }
 

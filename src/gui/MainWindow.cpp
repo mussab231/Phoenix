@@ -2,6 +2,7 @@
 
 #include "core/ClipboardWatcher.h"
 #include "core/DownloadQueue.h"
+#include "core/SessionStore.h"
 #include "core/SettingsStore.h"
 #include "core/UrlMatcher.h"
 #include "gui/AddDialog.h"
@@ -127,6 +128,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setupTray();
     applySettingsToUi();
+    restoreSession();
     if (!m_settings->mainGeometry().isEmpty())
         restoreGeometry(m_settings->mainGeometry());
     refreshStatus();
@@ -229,6 +231,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
     if (m_settings)
         m_settings->setMainGeometry(saveGeometry());
+    saveSession();
     QMainWindow::closeEvent(event);
 }
 
@@ -402,6 +405,32 @@ void MainWindow::refreshStatus() {
     if (failed)
         msg += QStringLiteral("   Failed: %1").arg(failed);
     statusBar()->showMessage(msg);
+}
+
+void MainWindow::restoreSession() {
+    std::string path = SessionStore::defaultPath();
+    if (path.empty() || !SessionStore::exists(path))
+        return;
+    for (const auto& it : SessionStore::load(path)) {
+        if (it.outputPath.empty())
+            continue;
+        m_queue->addDownload(it.url, it.outputPath, it.segments,
+                             it.scheduledAt > 0 ? it.scheduledAt : 0,
+                             it.maxSpeedBps,
+                             it.state == DownloadState::Paused);
+    }
+    SessionStore::remove(path);
+}
+
+void MainWindow::saveSession() {
+    std::string path = SessionStore::defaultPath();
+    if (path.empty())
+        return;
+    if (m_queue->items().empty()) {
+        SessionStore::remove(path);
+        return;
+    }
+    SessionStore::save(path, m_queue->items());
 }
 
 QString MainWindow::formatSize(qint64 bytes) {

@@ -35,6 +35,7 @@ add_executable(Phoenix
     src/core/HttpListener.cpp
     src/core/ClipboardWatcher.cpp
     src/core/SettingsStore.cpp
+    src/core/SessionStore.cpp
     src/gui/MainWindow.cpp
     src/gui/AddDialog.cpp
     src/gui/SettingsDialog.cpp

@@ -581,6 +581,7 @@ int runListenTest() {
         std::printf("LISTEN-TEST FAILED: could not bind a port\n");
         return 1;
     }
+    const std::string token = listener.token().toStdString();
 
     const std::string target = "https://example.com/path/file name.zip";
     QTimer::singleShot(0, &app, [&] {
@@ -594,7 +595,8 @@ int runListenTest() {
             a.sin_port = htons(port);
             a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
             if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0) {
-                const std::string rel = "/add?url=" + UrlCodec::encode(target);
+                const std::string rel = "/add?token=" + token + "&url=" +
+                                        UrlCodec::encode(target);
                 const std::string req =
                     "GET " + rel + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
                 send(s, req.data(), static_cast<int>(req.size()), 0);
@@ -602,6 +604,30 @@ int runListenTest() {
                 int n = recv(s, buf, sizeof(buf) - 1, 0);
                 if (n > 0)
                     gotUrl = gotUrl; // response body parsed below
+            }
+            closesocket(s);
+        }
+        WSACleanup();
+    });
+
+    // A request WITHOUT the token must be refused with 401 (closed door).
+    QTimer::singleShot(0, &app, [&] {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+            return;
+        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s != INVALID_SOCKET) {
+            sockaddr_in a{};
+            a.sin_family = AF_INET;
+            a.sin_port = htons(port);
+            a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0) {
+                const std::string req = "GET /add?url=https%3A%2F%2Fblocked HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+                send(s, req.data(), static_cast<int>(req.size()), 0);
+                char buf[512]{};
+                int m = recv(s, buf, sizeof(buf) - 1, 0);
+                if (m > 0)
+                    statusBody = QString::fromLatin1(buf, m);
             }
             closesocket(s);
         }
@@ -621,6 +647,11 @@ int runListenTest() {
         std::printf("LISTEN-TEST FAILED: wrong decoded url\n");
         return 1;
     }
+    if (statusBody.contains(QStringLiteral("200"))) {
+        std::printf("LISTEN-TEST FAILED: no-token request was accepted\n");
+        return 1;
+    }
+    std::printf("No-token request correctly refused (401).\n");
 
     // /status should return a 200 JSON blob (listener still running).
     WSADATA wsa;
@@ -633,14 +664,16 @@ int runListenTest() {
         a.sin_port = htons(port);
         a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0) {
-            const std::string req = "GET /status HTTP/1.1\r\nHost: x\r\n\r\n";
+            const std::string req =
+                "GET /status?token=" + token + " HTTP/1.1\r\nHost: x\r\n\r\n";
             send(s, req.data(), static_cast<int>(req.size()), 0);
             char buf[512]{};
             int n = recv(s, buf, sizeof(buf) - 1, 0);
             if (n > 0) {
                 statusBody = QString::fromLatin1(buf, n);
                 statusOk = statusBody.contains(QStringLiteral("200")) &&
-                           statusBody.contains(QStringLiteral("\"port\""));
+                           statusBody.contains(QStringLiteral("\"port\"")) &&
+                           statusBody.contains(QString::fromStdString(token));
             }
         }
         closesocket(s);
@@ -842,8 +875,10 @@ int main(int argc, char** argv) {
     quint16 port = listener.start(51047);
     if (port)
         w.statusBar()->showMessage(
-            QStringLiteral("Link catcher ready: http://127.0.0.1:%1  (and phoenix:// links)")
-                .arg(port));
+            QStringLiteral("Link catcher ready: "
+                           "http://127.0.0.1:%1/add?token=%2 (and phoenix:// links)")
+                .arg(port)
+                .arg(listener.token()));
 
     w.show();
     return app.exec();
