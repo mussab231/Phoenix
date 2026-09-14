@@ -1,10 +1,12 @@
 #include "core/HttpClient.h"
 
+#include "core/RateLimiter.h"
 #include "core/ResumeStore.h"
 
 #include <windows.h>
 #include <winhttp.h>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <fstream>
@@ -60,7 +62,7 @@ UrlParts crackUrl(const std::string& url) {
 class Session {
 public:
     explicit Session(const UrlParts& parts) {
-        hSession_ = WinHttpOpen(L"Phoenix/0.5",
+        hSession_ = WinHttpOpen(L"Phoenix/0.7",
                                 WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession_)
@@ -139,7 +141,33 @@ std::int64_t fileSizeOnDisk(const std::string& path) {
     return static_cast<std::int64_t>(in.tellg());
 }
 
+// Is this failure worth retrying? Cancellations, HTTP status errors, invalid
+// URLs and local disk problems are permanent; everything else (WinHTTP
+// socket/connection level, timeouts, simulated errors) gets a retry chance.
+bool isTransient(const std::string& msg) {
+    const auto has = [&](const char* needle) {
+        return msg.find(needle) != std::string::npos;
+    };
+    if (has("cancelled") || has("HTTP ") || has("Invalid URL") ||
+        has("encoding failed") || has("Cannot open") || has("preallocate") ||
+        has("Disk write") || has("seek"))
+        return false;
+    return true;
+}
+
+// Sleep for `ms` in 50 ms slices so a cancel/stop still returns quickly.
+void sleepInterruptible(int ms, const std::atomic<bool>* stopFlag) {
+    for (int left = ms; left > 0; left -= 50) {
+        if (stopFlag && stopFlag->load())
+            return;
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(std::min(left, 50)));
+    }
+}
+
 } // namespace
+
+std::atomic<int> HttpClient::g_testFakeFailures{0};
 
 std::int64_t HttpClient::getFileSize(const std::string& url) {
     UrlParts parts = crackUrl(url);
@@ -180,7 +208,13 @@ bool HttpClient::supportsRanges(const std::string& url) {
 void HttpClient::download(const std::string& url, const std::string& outputPath,
                           ProgressCallback progress, const std::atomic<bool>* stopFlag,
                           std::int64_t rangeStart, std::int64_t rangeEnd,
-                          std::int64_t writeOffset, bool truncate) {
+                          std::int64_t writeOffset, bool truncate,
+                          RateLimiter* limiter) {
+    // Test-only: each call decrements; the first N calls fail with a realistic
+    // transient error so --self-test-retry can watch recovery.
+    if (g_testFakeFailures.load(std::memory_order_relaxed) > 0 &&
+        g_testFakeFailures.fetch_sub(1) > 0)
+        throw std::runtime_error("simulated transient error");
     UrlParts parts = crackUrl(url);
     Session session(parts);
     HINTERNET hRequest = session.openRequest(parts, L"GET");
@@ -235,6 +269,8 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
         DWORD got = 0;
         if (!WinHttpReadData(hRequest, chunk.data(), toRead, &got) || got == 0)
             break;
+        if (limiter && !limiter->consume(got, stopFlag))
+            throw std::runtime_error("cancelled");
         out.write(chunk.data(), got);
         if (!out)
             throw std::runtime_error("Disk write failed");
@@ -248,11 +284,12 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
         throw std::runtime_error("cancelled");
 }
 
-void HttpClient::downloadSegmented(const std::string& url,
-                                   const std::string& outputPath,
-                                   ProgressCallback progress,
-                                   const std::atomic<bool>* stopFlag,
-                                   int numSegments) {
+void HttpClient::segmentedCore(const std::string& url,
+                               const std::string& outputPath,
+                               ProgressCallback progress,
+                               const std::atomic<bool>* stopFlag,
+                               int numSegments,
+                               RateLimiter* limiter) {
     if (numSegments < 1)
         numSegments = 1;
     if (numSegments > 16)
@@ -263,7 +300,7 @@ void HttpClient::downloadSegmented(const std::string& url,
     std::int64_t total = getFileSize(url);
     if (total <= 0 || numSegments == 1 || !supportsRanges(url)) {
         ResumeStore::remove(statePath); // no stale state without segmentation
-        download(url, outputPath, progress, stopFlag);
+        download(url, outputPath, progress, stopFlag, -1, -1, 0, true, limiter);
         return;
     }
     if (total < numSegments)
@@ -355,25 +392,50 @@ void HttpClient::downloadSegmented(const std::string& url,
     std::mutex errMutex;
     std::exception_ptr firstError;
 
+    // Per-segment retries inside one pass: up to kSegAttempts, exponential backoff.
+    constexpr int kSegAttempts = 4;
+    constexpr int kSegBaseDelayMs = 1000;
+
     auto worker = [&](int i) {
         try {
-            std::int64_t from =
-                segStart[static_cast<size_t>(i)] + segDone[static_cast<size_t>(i)].load();
+            std::int64_t from = segStart[static_cast<size_t>(i)] +
+                                segDone[static_cast<size_t>(i)].load();
             if (from > segEnd[static_cast<size_t>(i)])
                 return; // segment already complete
-            std::int64_t last = from;
-            download(url, outputPath,
-                     [&](std::int64_t cur, std::int64_t) {
-                         std::int64_t delta = cur - last;
-                         last = cur;
-                         if (delta > 0) {
-                             segDone[static_cast<size_t>(i)].fetch_add(delta);
-                             if (progress)
-                                 progress(agg.fetch_add(delta) + delta, total);
-                         }
-                     },
-                     stopFlag, from, segEnd[static_cast<size_t>(i)], from,
-                     false); // never truncate the shared file
+
+            std::int64_t attempt = 1;
+            for (;;) {
+                try {
+                    std::int64_t last = from;
+                    download(url, outputPath,
+                             [&](std::int64_t cur, std::int64_t) {
+                                 std::int64_t delta = cur - last;
+                                 last = cur;
+                                 if (delta > 0) {
+                                     segDone[static_cast<size_t>(i)].fetch_add(delta);
+                                     if (progress)
+                                         progress(agg.fetch_add(delta) + delta, total);
+                                 }
+                             },
+                             stopFlag, from, segEnd[static_cast<size_t>(i)], from,
+                             false, limiter); // never truncate the shared file
+                    return;                    // segment finished
+                } catch (const std::exception& e) {
+                    bool stopped = stopFlag && stopFlag->load();
+                    if (stopped)
+                        throw; // user cancel: propagate immediately
+                    if (attempt >= kSegAttempts || !isTransient(e.what()))
+                        throw;
+                    sleepInterruptible(kSegBaseDelayMs * (1 << (attempt - 1)),
+                                       stopFlag);
+                    // Resume from the byte recorded in segDone.
+                    from = segStart[static_cast<size_t>(i)] +
+                           segDone[static_cast<size_t>(i)].load();
+                    if (from > segEnd[static_cast<size_t>(i)])
+                        return;
+                    ++attempt;
+                }
+            }
         } catch (...) {
             std::lock_guard<std::mutex> lock(errMutex);
             if (!firstError)
@@ -399,4 +461,34 @@ void HttpClient::downloadSegmented(const std::string& url,
     ResumeStore::remove(statePath); // completed: no resume data needed
     if (progress)
         progress(total, total);
+}
+
+void HttpClient::downloadSegmented(const std::string& url,
+                                   const std::string& outputPath,
+                                   ProgressCallback progress,
+                                   const std::atomic<bool>* stopFlag,
+                                   int numSegments,
+                                   RateLimiter* limiter,
+                                   int maxAttempts,
+                                   int baseRetryMs) {
+    if (maxAttempts < 1)
+        maxAttempts = 1;
+    if (baseRetryMs < 0)
+        baseRetryMs = 0;
+
+    // Whole-call retry: a second pass resumes from the .phoenix-state file, so
+    // transient failures early on (HEAD/probe, fallback path) recover too.
+    for (int attempt = 1;; ++attempt) {
+        try {
+            segmentedCore(url, outputPath, progress, stopFlag, numSegments, limiter);
+            return;
+        } catch (const std::exception& e) {
+            if (attempt >= maxAttempts ||
+                (stopFlag && stopFlag->load()) || !isTransient(e.what()))
+                throw;
+            sleepInterruptible(baseRetryMs * (1 << (attempt - 1)), stopFlag);
+            if (stopFlag && stopFlag->load())
+                throw std::runtime_error("cancelled");
+        }
+    }
 }

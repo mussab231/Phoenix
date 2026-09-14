@@ -39,6 +39,15 @@ AddDialog::AddDialog(QWidget* parent) : QDialog(parent) {
     m_segmentsBox->setValue(8);
     form->addRow(QStringLiteral("Connections:"), m_segmentsBox);
 
+    m_speedBox = new QSpinBox(this);
+    m_speedBox->setRange(0, 100000); // KB/s
+    m_speedBox->setValue(0);
+    m_speedBox->setSuffix(QStringLiteral(" KB/s"));
+    m_speedBox->setSpecialValueText(QStringLiteral("Unlimited"));
+    m_speedBox->setToolTip(
+        QStringLiteral("Maximum download speed. Unlimited by default."));
+    form->addRow(QStringLiteral("Max speed:"), m_speedBox);
+
     m_scheduleCheck = new QCheckBox(QStringLiteral("Start later"), this);
     m_scheduleEdit =
         new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600), this);
@@ -76,6 +85,10 @@ QString AddDialog::outputPath() const {
 
 int AddDialog::segments() const {
     return m_segmentsBox->value();
+}
+
+double AddDialog::maxSpeedBps() const {
+    return static_cast<double>(m_speedBox->value()) * 1024.0;
 }
 
 bool AddDialog::isScheduled() const {

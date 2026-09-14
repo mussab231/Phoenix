@@ -1,6 +1,7 @@
 #include "core/DownloadEngine.h"
 
 #include "core/HttpClient.h"
+#include "core/RateLimiter.h"
 #include "core/ResumeStore.h"
 
 #include <QString>
@@ -26,6 +27,12 @@ void DownloadEngine::start(const std::string& url, const std::string& outputPath
     task.outputPath = outputPath;
     task.state = DownloadState::Running;
     m_worker = std::thread(&DownloadEngine::run, this, std::move(task));
+}
+
+void DownloadEngine::setSpeedLimit(double bytesPerSecond) {
+    if (!m_limiter)
+        m_limiter = std::make_unique<RateLimiter>(bytesPerSecond);
+    m_limiter->setRate(bytesPerSecond);
 }
 
 void DownloadEngine::cancel() {
@@ -64,11 +71,13 @@ void DownloadEngine::run(DownloadTask task) {
                 }
             }
             emit stateChanged(phase);
+            // 3 whole-call attempts, 1.5 s base backoff, shared rate limiter.
             HttpClient::downloadSegmented(task.url, task.outputPath, onProgress,
-                                          &m_stop, m_segments);
+                                          &m_stop, m_segments, m_limiter.get(), 3, 1500);
         } else {
             emit stateChanged(QStringLiteral("Downloading..."));
-            HttpClient::download(task.url, task.outputPath, onProgress, &m_stop);
+            HttpClient::download(task.url, task.outputPath, onProgress, &m_stop,
+                                 -1, -1, 0, true, m_limiter.get());
         }
 
         task.state = DownloadState::Completed;

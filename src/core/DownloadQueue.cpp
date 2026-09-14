@@ -13,12 +13,14 @@ DownloadQueue::DownloadQueue(QObject* parent) : QObject(parent) {
 }
 
 int DownloadQueue::addDownload(const std::string& url, const std::string& outputPath,
-                               int segments, std::int64_t startAtMs) {
+                               int segments, std::int64_t startAtMs,
+                               double maxSpeedBps) {
     DownloadItem item;
     item.id = m_nextId++;
     item.url = url;
     item.outputPath = outputPath;
     item.segments = segments < 1 ? 1 : (segments > 16 ? 16 : segments);
+    item.maxSpeedBps = maxSpeedBps < 0.0 ? 0.0 : maxSpeedBps;
     if (startAtMs > 0)
         item.scheduledAt = startAtMs;
     item.state = DownloadState::Idle;
@@ -217,6 +219,7 @@ void DownloadQueue::pump() {
         runner.speedTimer.start();
         m_runners.emplace(id, std::move(runner));
         emit itemChanged(id);
+        m_runners[id].engine->setSpeedLimit(next->maxSpeedBps);
         m_runners[id].engine->start(next->url, next->outputPath, next->segments);
     }
     checkFinished();

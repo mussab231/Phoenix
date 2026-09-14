@@ -16,6 +16,7 @@ public:
     QString url() const;
     QString outputPath() const;
     int segments() const;
+    double maxSpeedBps() const;
     bool isScheduled() const;
     qint64 scheduledAt() const;
 
@@ -26,6 +27,7 @@ private:
     QLineEdit* m_urlEdit = nullptr;
     QLineEdit* m_pathEdit = nullptr;
     QSpinBox* m_segmentsBox = nullptr;
+    QSpinBox* m_speedBox = nullptr;
     QCheckBox* m_scheduleCheck = nullptr;
     QDateTimeEdit* m_scheduleEdit = nullptr;
 };

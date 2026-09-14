@@ -25,8 +25,10 @@ public:
     explicit DownloadQueue(QObject* parent = nullptr);
 
     // startAtMs = epoch milliseconds; 0 (default) starts right away.
+    // maxSpeedBps = per-download speed cap; 0 = unlimited.
     int addDownload(const std::string& url, const std::string& outputPath,
-                    int segments = 8, std::int64_t startAtMs = 0);
+                    int segments = 8, std::int64_t startAtMs = 0,
+                    double maxSpeedBps = 0.0);
     void pauseDownload(int id);
     void resumeDownload(int id);
     void removeDownload(int id);

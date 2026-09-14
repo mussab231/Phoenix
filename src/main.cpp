@@ -1,6 +1,7 @@
 #include "core/DownloadQueue.h"
 #include "core/HttpClient.h"
 #include "core/PowerControl.h"
+#include "core/RateLimiter.h"
 #include "gui/MainWindow.h"
 #include "models/DownloadItem.h"
 
@@ -431,6 +432,118 @@ int runSleepTest() {
     return 0;
 }
 
+// Speed limiter test: 10 MB (≈6.7 s at 1.5 MiB/s) must actually take that
+// long and never average faster than the cap.
+int runSpeedLimitTest() {
+    const std::string url = "https://proof.ovh.net/files/10Mb.dat";
+    const std::int64_t expected = 10LL * 1024 * 1024;
+    const double limitBps = 1572864.0; // 1.5 MiB/s
+    const std::string out = tempFile("phoenix_limit.bin");
+    std::remove(out.c_str());
+    std::remove((out + ".phoenix-state").c_str());
+
+    RateLimiter limiter(limitBps);
+    DWORD t0 = GetTickCount();
+    try {
+        HttpClient::downloadSegmented(
+            url, out,
+            [](std::int64_t received, std::int64_t total) {
+                std::printf("\rLIMIT %lld / %lld", static_cast<long long>(received),
+                            static_cast<long long>(total));
+            },
+            nullptr, 8, &limiter, 1, 0);
+    } catch (const std::exception& e) {
+        std::printf("\nLIMIT-TEST FAILED: %s\n", e.what());
+        return 1;
+    }
+    double secs = (GetTickCount() - t0) / 1000.0;
+    std::int64_t got = diskSize(out);
+    double avg = (got > 0 && secs > 0) ? got / secs : 0.0;
+    double strictSecs = got / limitBps;
+    std::printf("\nSize: %lld (expected %lld), %.2fs (strict %.2fs), "
+                "avg %.2f MiB/s (cap %.2f MiB/s)\n",
+                static_cast<long long>(got), static_cast<long long>(expected), secs,
+                strictSecs, avg / 1024.0 / 1024.0, limitBps / 1024.0 / 1024.0);
+    if (got != expected) {
+        std::printf("LIMIT-TEST FAILED: size mismatch\n");
+        return 1;
+    }
+    if (avg > limitBps * 1.2) { // never wildly over the cap when averaging
+        std::printf("LIMIT-TEST FAILED: too fast, limiter not applied\n");
+        return 1;
+    }
+    if (secs < strictSecs * 0.6) {
+        std::printf("LIMIT-TEST FAILED: finished far too quickly\n");
+        return 1;
+    }
+    std::printf("LIMIT-TEST OK -> %s\n", out.c_str());
+    return 0;
+}
+
+// Retry test: simulate transient failures and check both recovery layers.
+// Part 1 (single connection) exercises the whole-call retry in
+// downloadSegmented; part 2 (8 segments) exercises the per-segment retry.
+int runRetryTest() {
+    const std::string url = "https://proof.ovh.net/files/10Mb.dat";
+    const std::int64_t expected = 10LL * 1024 * 1024;
+
+    // Part 1: single-connection fallback -> whole-call retry layer.
+    const std::string out1 = tempFile("phoenix_retry1.bin");
+    std::remove(out1.c_str());
+    std::remove((out1 + ".phoenix-state").c_str());
+    HttpClient::g_testFakeFailures = 1;
+    DWORD t0 = GetTickCount();
+    try {
+        HttpClient::downloadSegmented(
+            url, out1,
+            [](std::int64_t received, std::int64_t total) {
+                std::printf("\rRETRY1 %lld / %lld", static_cast<long long>(received),
+                            static_cast<long long>(total));
+            },
+            nullptr, 1, nullptr, 3, 200);
+    } catch (const std::exception& e) {
+        HttpClient::g_testFakeFailures = 0;
+        std::printf("\nRETRY-TEST FAILED (part 1, whole-call): %s\n", e.what());
+        return 1;
+    }
+    double secs1 = (GetTickCount() - t0) / 1000.0;
+    std::int64_t got1 = diskSize(out1);
+    std::printf("\nPart 1: %lld bytes in %.2fs (whole-call retry OK)\n",
+                static_cast<long long>(got1), secs1);
+
+    // Part 2: 8 segments -> per-segment retry layer.
+    const std::string out2 = tempFile("phoenix_retry2.bin");
+    std::remove(out2.c_str());
+    std::remove((out2 + ".phoenix-state").c_str());
+    HttpClient::g_testFakeFailures = 1;
+    t0 = GetTickCount();
+    try {
+        HttpClient::downloadSegmented(
+            url, out2,
+            [](std::int64_t received, std::int64_t total) {
+                std::printf("\rRETRY2 %lld / %lld", static_cast<long long>(received),
+                            static_cast<long long>(total));
+            },
+            nullptr, 8, nullptr, 3, 200);
+    } catch (const std::exception& e) {
+        HttpClient::g_testFakeFailures = 0;
+        std::printf("\nRETRY-TEST FAILED (part 2, segment): %s\n", e.what());
+        return 1;
+    }
+    HttpClient::g_testFakeFailures = 0;
+    double secs2 = (GetTickCount() - t0) / 1000.0;
+    std::int64_t got2 = diskSize(out2);
+    std::printf("\nPart 2: %lld bytes in %.2fs (segment retry OK)\n",
+                static_cast<long long>(got2), secs2);
+
+    if (got1 != expected || got2 != expected) {
+        std::printf("RETRY-TEST FAILED: size mismatch after recovery\n");
+        return 1;
+    }
+    std::printf("RETRY-TEST OK\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -446,6 +559,10 @@ int main(int argc, char** argv) {
             return runScheduleTest();
         if (arg == "--self-test-sleep")
             return runSleepTest();
+        if (arg == "--self-test-limit")
+            return runSpeedLimitTest();
+        if (arg == "--self-test-retry")
+            return runRetryTest();
     }
     QApplication app(argc, argv);
     applyTheme(app);

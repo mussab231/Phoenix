@@ -5,8 +5,11 @@
 #include <QObject>
 
 #include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
+
+class RateLimiter;
 
 // Runs one download on a worker thread, reports back via Qt signals.
 class DownloadEngine : public QObject {
@@ -17,6 +20,7 @@ public:
 
     void start(const std::string& url, const std::string& outputPath,
                int segments = 8);
+    void setSpeedLimit(double bytesPerSecond); // 0 = unlimited
     void cancel();
     void wait(); // blocks until the worker thread ends (also done by dtor)
 
@@ -33,4 +37,5 @@ private:
     std::thread m_worker;
     std::atomic<bool> m_stop{false};
     int m_segments = 8;
+    std::unique_ptr<RateLimiter> m_limiter; // set on the GUI thread before start()
 };

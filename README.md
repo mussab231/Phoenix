@@ -8,7 +8,7 @@ Goal: match — then surpass — Internet Download Manager.
 
 ---
 
-## ✨ Features (v0.6)
+## ✨ Features (v0.7)
 
 | Feature | Status |
 |---------|--------|
@@ -22,8 +22,9 @@ Goal: match — then surpass — Internet Download Manager.
 | Phoenix flame app icon: window + taskbar + embedded in `.exe` | ✅ |
 | Smart fallback to single connection when server ignores `Range` | ✅ |
 | Byte-for-byte verified downloads (segmented == single-connection) | ✅ |
-| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`) | ✅ |
-| Speed limiter + smart retry | 🔜 v0.7 |
+| **Speed limiter** (per download, "Max speed" in Add dialog, shared across segments) | ✅ |
+| **Smart retry**: transient errors are retried with exponential backoff (per-segment + whole-call), persistent errors (404/disk/cancel) never retried | ✅ |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`) | ✅ |
 | Browser integration (link catching) | 🔜 v0.8 |
 
 ## 🛠️ Requirements
@@ -52,6 +53,8 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 .\build\Phoenix.exe --self-test-queue  # two downloads at once through the queue
 .\build\Phoenix.exe --self-test-schedule # starts a download at +2.5s (verifies it waits)
 .\build\Phoenix.exe --self-test-sleep  # queue finishes -> "sleep" action fires (no-op in test)
+.\build\Phoenix.exe --self-test-limit   # 10 MB capped at 1.5 MiB/s (verifies the limiter throttles)
+.\build\Phoenix.exe --self-test-retry   # injected transient errors -> recovery (whole-call + per-segment)
 ```
 
 ## 🗂️ Project layout
@@ -71,6 +74,7 @@ Phoenix/
 │   │   ├── ResumeStore.*     # .phoenix-state persistence (pause/crash recovery)
 │   │   ├── DownloadEngine.*  # one download on a worker thread + Qt signals
 │   │   ├── DownloadQueue.*   # coordinates several engines (concurrency limit, scheduler)
+│   │   ├── RateLimiter.*     # shared token-bucket speed limiter for the segment workers
 │   │   └── PowerControl.*    # sleep / hibernate / shutdown (test mode built in)
 │   ├── models/
 │   │   ├── DownloadTask.h

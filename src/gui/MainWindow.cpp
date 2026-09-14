@@ -27,7 +27,7 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.6"));
+    setWindowTitle(QStringLiteral("Phoenix 0.7"));
     resize(820, 460);
 
     // Phoenix flame icon (multi-size so 16px taskbar and 256px details both crisp).
@@ -103,7 +103,8 @@ void MainWindow::onAdd() {
     if (dlg.exec() != QDialog::Accepted)
         return;
     m_queue->addDownload(dlg.url().toStdString(), dlg.outputPath().toStdString(),
-                         dlg.segments(), dlg.isScheduled() ? dlg.scheduledAt() : 0);
+                         dlg.segments(), dlg.isScheduled() ? dlg.scheduledAt() : 0,
+                         dlg.maxSpeedBps());
 }
 
 void MainWindow::onPause() {
