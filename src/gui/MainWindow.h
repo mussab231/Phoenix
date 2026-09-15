@@ -5,6 +5,7 @@
 #include <string>
 
 class QComboBox;
+class QLabel;
 class QProgressBar;
 class QPushButton;
 class QSpinBox;
@@ -58,6 +59,7 @@ private:
     void setupTray();
     void applySettingsToUi();
     void clearCompleted();
+    void retranslateUi();
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
     static QString baseName(const QString& path);
@@ -70,12 +72,23 @@ private:
     QPushButton* m_pauseBtn = nullptr;
     QPushButton* m_resumeBtn = nullptr;
     QPushButton* m_removeBtn = nullptr;
+    QPushButton* m_settingsBtn = nullptr;
+    QPushButton* m_clearBtn = nullptr;
+    QLabel* m_maxLbl = nullptr;
+    QLabel* m_doneLbl = nullptr;
 
     DownloadQueue* m_queue = nullptr;
     SettingsStore* m_settings = nullptr;
     QSystemTrayIcon* m_tray = nullptr;
     QMenu* m_trayMenu = nullptr;
     QAction* m_watchClipAct = nullptr;
+    QAction* m_showAct = nullptr;
+    QAction* m_addAct = nullptr;
+    QAction* m_settingsAct = nullptr;
+    QAction* m_clearAct = nullptr;
+    QAction* m_pauseAllAct = nullptr;
+    QAction* m_resumeAllAct = nullptr;
+    QAction* m_quitAct = nullptr;
     ClipboardWatcher* m_clipWatcher = nullptr;
     bool m_firstHide = true;
 };

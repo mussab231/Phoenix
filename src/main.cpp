@@ -1069,12 +1069,7 @@ int main(int argc, char** argv) {
     // locale. Arabic flips the whole UI to right-to-left. Must run before any
     // widget is constructed.
     SettingsStore uiPrefs;
-    const int lang = uiPrefs.language();
-    const bool arabic =
-        lang == 2 || (lang == 0 && QLocale::system().language() == QLocale::Arabic);
-    I18n::setArabic(arabic);
-    if (arabic)
-        app.setLayoutDirection(Qt::RightToLeft);
+    I18n::applyFromSetting(uiPrefs.language());
 
     QIcon windowIcon;
     for (int s : {16, 24, 32, 48, 64, 128, 256})

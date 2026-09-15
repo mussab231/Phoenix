@@ -62,26 +62,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_pauseBtn = new QPushButton(I18n::t("Pause"), central);
     m_resumeBtn = new QPushButton(I18n::t("Resume"), central);
     m_removeBtn = new QPushButton(I18n::t("Remove"), central);
-    auto* settingsBtn = new QPushButton(I18n::t("Settings"), central);
-    auto* clearBtn = new QPushButton(I18n::t("Clear completed"), central);
+    m_settingsBtn = new QPushButton(I18n::t("Settings"), central);
+    m_clearBtn = new QPushButton(I18n::t("Clear completed"), central);
     m_pauseBtn->setToolTip(I18n::t("Pause the selected download (resumable)"));
     m_resumeBtn->setToolTip(I18n::t("Resume the selected download"));
     m_removeBtn->setToolTip(I18n::t("Remove the selected download from the queue"));
-    settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
+    m_settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
     topRow->addWidget(m_addBtn);
     topRow->addWidget(m_pauseBtn);
     topRow->addWidget(m_resumeBtn);
     topRow->addWidget(m_removeBtn);
-    topRow->addWidget(settingsBtn);
-    topRow->addWidget(clearBtn);
+    topRow->addWidget(m_settingsBtn);
+    topRow->addWidget(m_clearBtn);
     topRow->addStretch(1);
-    topRow->addWidget(new QLabel(I18n::t("Max simultaneous:"), central));
+    m_maxLbl = new QLabel(I18n::t("Max simultaneous:"), central);
+    topRow->addWidget(m_maxLbl);
     m_maxBox = new QSpinBox(central);
     m_maxBox->setRange(1, 5);
     m_maxBox->setValue(3);
     topRow->addWidget(m_maxBox);
     topRow->addSpacing(12);
-    topRow->addWidget(new QLabel(I18n::t("When done:"), central));
+    m_doneLbl = new QLabel(I18n::t("When done:"), central);
+    topRow->addWidget(m_doneLbl);
     m_doneBox = new QComboBox(central);
     m_doneBox->addItems({I18n::t("Do nothing"), I18n::t("Sleep"),
                          I18n::t("Hibernate"), I18n::t("Shutdown")});
@@ -105,8 +107,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPause);
     connect(m_resumeBtn, &QPushButton::clicked, this, &MainWindow::onResume);
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
-    connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
-    connect(clearBtn, &QPushButton::clicked, this, &MainWindow::clearCompleted);
+    connect(m_settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
+    connect(m_clearBtn, &QPushButton::clicked, this, &MainWindow::clearCompleted);
     connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
             &DownloadQueue::setMaxConcurrent);
     connect(m_doneBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -168,6 +170,51 @@ void MainWindow::applySettingsToUi() {
         m_clipWatcher->setEnabled(m_settings->watchClipboard());
 }
 
+void MainWindow::retranslateUi() {
+    m_addBtn->setText(I18n::t("Add"));
+    m_pauseBtn->setText(I18n::t("Pause"));
+    m_resumeBtn->setText(I18n::t("Resume"));
+    m_removeBtn->setText(I18n::t("Remove"));
+    m_settingsBtn->setText(I18n::t("Settings"));
+    m_clearBtn->setText(I18n::t("Clear completed"));
+    m_pauseBtn->setToolTip(I18n::t("Pause the selected download (resumable)"));
+    m_resumeBtn->setToolTip(I18n::t("Resume the selected download"));
+    m_removeBtn->setToolTip(I18n::t("Remove the selected download from the queue"));
+    m_settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
+
+    m_maxLbl->setText(I18n::t("Max simultaneous:"));
+    m_doneLbl->setText(I18n::t("When done:"));
+
+    // Rebuild the combo without firing the queue slot mid-swap.
+    const int idx = m_doneBox->currentIndex();
+    m_doneBox->blockSignals(true);
+    m_doneBox->clear();
+    m_doneBox->addItems({I18n::t("Do nothing"), I18n::t("Sleep"),
+                         I18n::t("Hibernate"), I18n::t("Shutdown")});
+    m_doneBox->setCurrentIndex(qBound(0, idx, m_doneBox->count() - 1));
+    m_doneBox->blockSignals(false);
+
+    m_table->setHorizontalHeaderLabels(
+        {I18n::t("File"), I18n::t("Size"), I18n::t("Progress"),
+         I18n::t("Speed"), I18n::t("Status")});
+
+    if (m_tray) {
+        m_tray->setToolTip(I18n::t("Phoenix Download Manager"));
+        m_showAct->setText(I18n::t("Show / Hide"));
+        m_addAct->setText(I18n::t("Add Download..."));
+        m_settingsAct->setText(I18n::t("Settings..."));
+        m_clearAct->setText(I18n::t("Clear completed"));
+        m_pauseAllAct->setText(I18n::t("Pause All"));
+        m_resumeAllAct->setText(I18n::t("Resume All"));
+        m_watchClipAct->setText(I18n::t("Watch clipboard for links"));
+        m_quitAct->setText(I18n::t("Quit"));
+    }
+
+    for (const auto& it : m_queue->items())
+        updateRow(it.id);
+    refreshStatus();
+}
+
 void MainWindow::setupTray() {
     if (!QSystemTrayIcon::isSystemTrayAvailable())
         return;
@@ -177,37 +224,36 @@ void MainWindow::setupTray() {
     m_tray->setToolTip(I18n::t("Phoenix Download Manager"));
 
     m_trayMenu = new QMenu(this);
-    QAction* showAct = m_trayMenu->addAction(I18n::t("Show / Hide"));
-    connect(showAct, &QAction::triggered, this, &MainWindow::showWindow);
+    m_showAct = m_trayMenu->addAction(I18n::t("Show / Hide"));
+    connect(m_showAct, &QAction::triggered, this, &MainWindow::showWindow);
     m_trayMenu->addSeparator();
 
-    QAction* addAct = m_trayMenu->addAction(I18n::t("Add Download..."));
-    connect(addAct, &QAction::triggered, this, &MainWindow::onAdd);
+    m_addAct = m_trayMenu->addAction(I18n::t("Add Download..."));
+    connect(m_addAct, &QAction::triggered, this, &MainWindow::onAdd);
 
-    QAction* settingsAct = m_trayMenu->addAction(I18n::t("Settings..."));
-    connect(settingsAct, &QAction::triggered, this, &MainWindow::onSettings);
+    m_settingsAct = m_trayMenu->addAction(I18n::t("Settings..."));
+    connect(m_settingsAct, &QAction::triggered, this, &MainWindow::onSettings);
 
-    QAction* clearAct = m_trayMenu->addAction(I18n::t("Clear completed"));
-    connect(clearAct, &QAction::triggered, this, &MainWindow::clearCompleted);
+    m_clearAct = m_trayMenu->addAction(I18n::t("Clear completed"));
+    connect(m_clearAct, &QAction::triggered, this, &MainWindow::clearCompleted);
 
-    QAction* pauseAll = m_trayMenu->addAction(I18n::t("Pause All"));
-    connect(pauseAll, &QAction::triggered, this, [this] {
+    m_pauseAllAct = m_trayMenu->addAction(I18n::t("Pause All"));
+    connect(m_pauseAllAct, &QAction::triggered, this, [this] {
         for (auto it : m_queue->items())
             m_queue->pauseDownload(it.id);
     });
 
-    QAction* resumeAll = m_trayMenu->addAction(I18n::t("Resume All"));
-    connect(resumeAll, &QAction::triggered, this, [this] {
+    m_resumeAllAct = m_trayMenu->addAction(I18n::t("Resume All"));
+    connect(m_resumeAllAct, &QAction::triggered, this, [this] {
         for (auto it : m_queue->items())
             if (it.state == DownloadState::Paused)
                 m_queue->resumeDownload(it.id);
     });
 
-    QAction* watchClip = m_trayMenu->addAction(I18n::t("Watch clipboard for links"));
-    watchClip->setCheckable(true);
-    watchClip->setChecked(m_settings->watchClipboard());
-    m_watchClipAct = watchClip;
-    connect(watchClip, &QAction::toggled, this, [this](bool on) {
+    m_watchClipAct = m_trayMenu->addAction(I18n::t("Watch clipboard for links"));
+    m_watchClipAct->setCheckable(true);
+    m_watchClipAct->setChecked(m_settings->watchClipboard());
+    connect(m_watchClipAct, &QAction::toggled, this, [this](bool on) {
         if (m_settings)
             m_settings->setWatchClipboard(on);
         if (m_clipWatcher)
@@ -215,8 +261,8 @@ void MainWindow::setupTray() {
     });
 
     m_trayMenu->addSeparator();
-    QAction* quitAct = m_trayMenu->addAction(I18n::t("Quit"));
-    connect(quitAct, &QAction::triggered, this, [this] {
+    m_quitAct = m_trayMenu->addAction(I18n::t("Quit"));
+    connect(m_quitAct, &QAction::triggered, this, [this] {
         QSystemTrayIcon* t = m_tray;
         m_tray = nullptr; // allow closeEvent to actually quit
         m_firstHide = false;
@@ -320,6 +366,9 @@ void MainWindow::onSettings() {
     SettingsDialog dlg(m_settings, this);
     if (dlg.exec() != QDialog::Accepted)
         return;
+    // Language changes take effect immediately (no restart).
+    I18n::applyFromSetting(m_settings->language());
+    retranslateUi();
     applySettingsToUi();
 }
 

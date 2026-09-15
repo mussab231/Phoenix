@@ -1,7 +1,10 @@
 #include "gui/I18n.h"
 
+#include <QApplication>
 #include <QHash>
+#include <QLocale>
 #include <QStringList>
+#include <QWidget>
 
 bool I18n::s_arabic = false;
 
@@ -11,6 +14,26 @@ void I18n::setArabic(bool on) {
 
 bool I18n::isArabic() {
     return s_arabic;
+}
+
+void I18n::applyFromSetting(int lang) {
+    const bool arabic =
+        lang == 2 || (lang == 0 && QLocale::system().language() == QLocale::Arabic);
+    s_arabic = arabic;
+
+    auto* app = qobject_cast<QApplication*>(QCoreApplication::instance());
+    if (!app)
+        return;
+    const Qt::LayoutDirection dir =
+        arabic ? Qt::RightToLeft : Qt::LeftToRight;
+    QApplication::setLayoutDirection(dir);
+    // Re-layout every open window (setting only the application direction
+    // would leave already-created top-level widgets untouched).
+    const auto toplevels = app->topLevelWidgets();
+    for (QWidget* w : toplevels) {
+        if (w->layoutDirection() != dir)
+            w->setLayoutDirection(dir);
+    }
 }
 
 namespace {

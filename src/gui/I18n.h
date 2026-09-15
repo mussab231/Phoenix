@@ -13,6 +13,11 @@ public:
     static void setArabic(bool on);
     static bool isArabic();
 
+    // Resolves a stored preference (0 = system, 1 = English, 2 = Arabic),
+    // enables the matching language and switches the layout direction of all
+    // open windows immediately (no restart needed).
+    static void applyFromSetting(int lang);
+
     // Static UI strings (button labels, headers, tooltips, ...).
     static QString t(const char* en);
     static QString t(const QString& en);
