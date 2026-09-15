@@ -1,4 +1,5 @@
 #include "core/DownloadQueue.h"
+#include "core/Checksum.h"
 #include "core/HttpClient.h"
 #include "core/HttpListener.h"
 #include "core/NativeHost.h"
@@ -1042,6 +1043,29 @@ int main(int argc, char** argv) {
         // flag of its own.
         if (arg.rfind("chrome-extension://", 0) == 0)
             return runNativeHost(argc, argv);
+        if (arg == "--checksum" && i + 1 < argc) {
+            // Phoenix --checksum <file>          prints lowercase hex SHA-256
+            // Phoenix --checksum <file> <hash>   verifies; exit 0 = match
+            const std::string path = argv[++i];
+            const std::string hash = (i + 1 < argc) ? argv[++i] : std::string();
+            const std::string got = Checksum::sha256File(path);
+            if (got.empty()) {
+                std::fprintf(stderr, "CHECKSUM FAILED: cannot read %s\n",
+                             path.c_str());
+                return 1;
+            }
+            if (hash.empty()) {
+                std::printf("%s  %s\n", got.c_str(), path.c_str());
+                return 0;
+            }
+            if (Checksum::hexEquals(got, hash)) {
+                std::printf("CHECKSUM OK\n");
+                return 0;
+            }
+            std::fprintf(stderr, "CHECKSUM MISMATCH\n  expected %s\n  got      %s\n",
+                         hash.c_str(), got.c_str());
+            return 1;
+        }
         if (arg == "--register")
             return ProtocolRegistrar::registerHandler() ? 0 : 1;
         if (arg == "--unregister")

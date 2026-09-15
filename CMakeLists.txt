@@ -40,6 +40,7 @@ if(PHOENIX_RELEASE)
         src/core/SettingsStore.cpp
         src/core/SessionStore.cpp
         src/core/NativeHost.cpp
+        src/core/Checksum.cpp
         src/gui/MainWindow.cpp
         src/gui/AddDialog.cpp
         src/gui/SettingsDialog.cpp
@@ -65,6 +66,7 @@ else()
         src/core/SettingsStore.cpp
         src/core/SessionStore.cpp
         src/core/NativeHost.cpp
+        src/core/Checksum.cpp
         src/gui/MainWindow.cpp
         src/gui/AddDialog.cpp
         src/gui/SettingsDialog.cpp
