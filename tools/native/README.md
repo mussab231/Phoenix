@@ -6,12 +6,17 @@ replacement for clipboard scraping. When you right-click a link and pick
 
 ## How it works
 
-The browser launches `Phoenix.exe --native-messaging` and speaks
-[length-prefixed JSON](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)
-over stdin/stdout. If a Phoenix window is already open, incoming links are
-forwarded to it over the single-instance pipe (so the download appears in the
-visible queue); otherwise the host process queues the download itself, then
-exits when the browser closes the channel.
+Chrome/Edge launch the host by calling `Phoenix.exe chrome-extension://<id>/`
+— the calling extension's origin is the first argument; no extra flags are
+needed (the browser doesn't support a manifest `"args"` field). The native host
+detects the `chrome-extension://` prefix and switches to native-messaging mode,
+speaking length-prefixed JSON over stdin/stdout. When an "add" request arrives:
+- If a Phoenix window is already open, it is handed off over the single-instance
+  pipe so the download appears in the visible queue.
+- Otherwise the host launches a fresh Phoenix GUI carrying the `phoenix://`
+  link on its command line — the window opens with the download already queued.
+
+The host process exits when the browser closes the channel.
 
 ## Install (Chrome / Edge)
 
@@ -57,7 +62,9 @@ Host -> browser:
 ## Self-test
 
 `Phoenix.exe --self-test-native` exercises the frame protocol on a real pipe and
-the JSON dispatcher (ping / add / status / unknown).
+the JSON dispatcher (ping / add / status / unknown). `Phoenix.exe
+--native-messaging` (no browser) is kept as a manual/testing alias for the same
+mode Chrome triggers via the origin argument.
 
 ## Firefox
 

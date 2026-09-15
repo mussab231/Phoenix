@@ -790,11 +790,40 @@ int runSettingsTest() {
     return 0;
 }
 
-// Headless Native Messaging Host entry point. The browser launches
-// "Phoenix.exe --native-messaging <origin>" and speaks length-prefixed JSON
-// frames over stdin/stdout. If a Phoenix window is already running, "add"
-// requests are handed to it over the single-instance pipe (so the download
-// shows up in the visible queue); otherwise this process queues them itself.
+// Launches a normal Phoenix GUI instance carrying a phoenix:// link on its
+// command line. The fresh window parses it, shows itself and queues the
+// download — the native host only runs until the browser closes the channel,
+// so self-queued (headless) downloads would be killed with us. This is the
+// "no window open yet" path: the user clicks "Send link to Phoenix", the
+// program opens with the download already in the queue.
+bool launchGuiWithLink(const QString& link) {
+    char exe[MAX_PATH]{};
+    if (!GetModuleFileNameA(nullptr, exe, MAX_PATH))
+        return false;
+    const std::string cmd =
+        std::string("\"") + exe + "\" \"" + link.toStdString() + "\"";
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWNORMAL;
+    PROCESS_INFORMATION pi{};
+    // bInheritHandles = FALSE so the child does NOT inherit our native
+    // messaging stdin/stdout (it must never read the browser frames).
+    if (!CreateProcessA(exe, const_cast<char*>(cmd.c_str()), nullptr, nullptr,
+                        FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        return false;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+// Native Messaging Host entry point. Chrome/Edge spawn "Phoenix.exe
+// <chrome-extension://id/>" (the origin of the caller is the first argument)
+// and speak length-prefixed JSON frames over stdin/stdout. --native-messaging
+// is kept as a manual/testing alias. An "add" request is forwarded to a
+// running Phoenix window over the single-instance pipe, or a fresh window is
+// launched with the phoenix:// link, so the download always lands in the
+// visible GUI queue.
 int runNativeHost(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("Phoenix"));
@@ -812,7 +841,7 @@ int runNativeHost(int argc, char** argv) {
                      [&](const QJsonObject& request) {
         const bool isAdd =
             request.value(QStringLiteral("type")).toString() == QStringLiteral("add");
-        if (isAdd && SingleInstance::isOwnerRunning()) {
+        if (isAdd) {
             const QString url =
                 request.value(QStringLiteral("url")).toString();
             const QString name =
@@ -822,13 +851,25 @@ int runNativeHost(int argc, char** argv) {
                 name.isEmpty() ? parsed.fileName() : name;
             const std::string link = UrlCodec::buildProtocolLink(
                 url.toStdString(), nameOrDefault.toStdString());
-            if (single.tryActivate(QString::fromStdString(link))) {
+            if (SingleInstance::isOwnerRunning()) {
+                if (single.tryActivate(QString::fromStdString(link))) {
+                    handedOff = true;
+                    host.reply({{QStringLiteral("ok"), true},
+                                {QStringLiteral("method"),
+                                 QStringLiteral("handoff")}});
+                    return;
+                }
+            }
+            if (launchGuiWithLink(QString::fromStdString(link))) {
                 handedOff = true;
                 host.reply({{QStringLiteral("ok"), true},
-                            {QStringLiteral("method"), QStringLiteral("handoff")}});
+                            {QStringLiteral("method"),
+                             QStringLiteral("launched")}});
                 return;
             }
         }
+        // Last resort: no window could be reached — queue in this headless
+        // process (best effort; the download may be short-lived).
         const QString dir = settings.defaultDirectory().isEmpty()
             ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
             : settings.defaultDirectory();
@@ -993,6 +1034,11 @@ int main(int argc, char** argv) {
         if (arg == "--self-test-native")
             return runNativeHostTest();
         if (arg == "--native-messaging")
+            return runNativeHost(argc, argv);
+        // Chrome/Edge spawn the native host with the calling extension's
+        // origin ("chrome-extension://<id>/") as the first argument and no
+        // flag of its own.
+        if (arg.rfind("chrome-extension://", 0) == 0)
             return runNativeHost(argc, argv);
         if (arg == "--register")
             return ProtocolRegistrar::registerHandler() ? 0 : 1;
