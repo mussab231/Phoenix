@@ -35,6 +35,11 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **Persistent settings**: default folder, connections, max speed, concurrency, when-done action, clipboard watch and window position are saved and restored | ✅ |
 | **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
 | **Native Messaging Host + browser extension** (`tools/native/`): right-click any link -> "Send link to Phoenix"; hands off to the running window or queues itself | ✅ |
+| **Arabic UI + RTL**: complete Arabic interface with right-to-left layout; language switch applies live (no restart), persists across runs | ✅ |
+| **Start with Windows** & **Start minimized to tray** options (Settings → boot into the tray, `HKCU\...\Run` autostart) | ✅ |
+| **Add dialog pre-fill**: a copied download URL is detected and both URL + target name are filled in automatically | ✅ |
+| **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
+| Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-0.9.0-portable.zip`) + Inno Setup script | ✅ |
 | Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`) | ✅ |
 
 ## 🛠️ Requirements
@@ -110,10 +115,13 @@ Phoenix/
 │   └── gui/
 │       ├── MainWindow.*      # queue table + controls + status bar
 │       ├── AddDialog.*       # new-download dialog
+│       ├── SettingsDialog.*  # preferences editor
+│       ├── I18n.*            # English/Arabic UI strings + RTL live switching
 │       └── theme.qss         # dark Phoenix style sheet
 ├── tools/
 │   ├── make_icon/            # dev tool: SVG -> PNG sizes + .ico (needs qt6-svg)
-│   └── native/               # browser integration: install.ps1 + MV3 extension
+│   ├── native/               # browser integration: install.ps1 + MV3 extension
+│   └── release/              # build-release.ps1 (portable zip) + Phoenix.iss (Inno Setup)
 └── .vscode/                  # build / run / debug tasks
 ```
 

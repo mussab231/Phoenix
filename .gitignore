@@ -1,7 +1,11 @@
 # Build output
 build/
+build-release/
 cmake-build-*/
 tools/make_icon/build/
+
+# Release packaging output
+dist/
 
 # Compiled objects / binaries (outside build/)
 *.obj
