@@ -20,6 +20,13 @@ public:
     // Throws std::runtime_error on failure.
     static std::int64_t getFileSize(const std::string& url);
 
+    // Fetches the resource's ETag and Last-Modified (either may stay empty if
+    // the server sends neither). Used as an identity check on resume: same URL
+    // and size does not prove the bytes are unchanged.
+    static void getResourceIdentity(const std::string& url,
+                                   std::string& etag,
+                                   std::string& lastModified);
+
     // Probes Range support with a 1-byte request (expects HTTP 206).
     static bool supportsRanges(const std::string& url);
 

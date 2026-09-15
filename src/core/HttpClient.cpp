@@ -28,6 +28,19 @@ std::wstring toWide(const std::string& s) {
     return w;
 }
 
+std::string toUtf8(const std::wstring& w) {
+    if (w.empty())
+        return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr,
+                               nullptr);
+    if (n <= 0)
+        return {};
+    std::string s(static_cast<size_t>(n) - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, s.data(), n, nullptr,
+                        nullptr);
+    return s;
+}
+
 [[noreturn]] void fail(const std::string& what) {
     throw std::runtime_error(std::string(what) + " (Win32 error " +
                              std::to_string(GetLastError()) + ")");
@@ -344,6 +357,40 @@ std::int64_t HttpClient::getFileSize(const std::string& url) {
     return rt;
 }
 
+void HttpClient::getResourceIdentity(const std::string& url,
+                                    std::string& etag,
+                                    std::string& lastModified) {
+    etag.clear();
+    lastModified.clear();
+    UrlParts parts = crackUrl(url);
+    Session session(parts);
+    HINTERNET hRequest = session.openRequest(parts, L"HEAD");
+
+    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(hRequest, nullptr))
+        return; // identity unknown, not fatal: fall back to URL+total check
+
+    // WinHTTP gives headers as wide strings; convert both back to UTF-8.
+    auto readHeader = [&](DWORD which) -> std::string {
+        DWORD len = 0;
+        if (!WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
+                                 WINHTTP_NO_OUTPUT_BUFFER, &len,
+                                 WINHTTP_NO_HEADER_INDEX) ||
+            len == 0)
+            return {};
+        std::wstring w(static_cast<size_t>(len / sizeof(wchar_t)), L'\0');
+        if (!WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
+                                 w.data(), &len, WINHTTP_NO_HEADER_INDEX))
+            return {};
+        if (!w.empty() && w.back() == L'\0')
+            w.pop_back();
+        return toUtf8(w);
+    };
+    etag = readHeader(WINHTTP_QUERY_ETAG);
+    lastModified = readHeader(WINHTTP_QUERY_LAST_MODIFIED);
+}
+
 bool HttpClient::supportsRanges(const std::string& url) {
     UrlParts parts = crackUrl(url);
     Session session(parts);
@@ -463,6 +510,12 @@ void HttpClient::segmentedCore(const std::string& url,
     if (total < numSegments)
         numSegments = static_cast<int>(total);
 
+    // Identity validators for the resume decision below. Many servers expose
+    // an ETag or Last-Modified; if present and mismatched on resume, the file
+    // changed under us and the saved byte-ranges must be discarded.
+    std::string etag, lastModified;
+    getResourceIdentity(url, etag, lastModified);
+
     // Dynamic re-segmentation: no fixed per-connection ranges. A per-launch
     // chunk size keeps request overhead low, and a shared cursor hands each
     // idle connection the next unclaimed chunk, so a fast connection that
@@ -479,6 +532,19 @@ void HttpClient::segmentedCore(const std::string& url,
     if (auto saved = ResumeStore::load(statePath)) {
         bool ok = saved->url == url && saved->total == total &&
                   fileSizeOnDisk(outputPath) == total;
+        // URL+total agreement still does not prove the content is the same
+        // file: a server can swap bytes while keeping the size. If either
+        // identity header is exposed and differs, treat the state as stale.
+        // Empty saved+current means the server sent nothing twice; we cannot
+        // do better than the URL+total check in that case.
+        if (ok && (!etag.empty() || !lastModified.empty())) {
+            bool sameEtag = etag.empty() ||
+                            (!saved->etag.empty() && saved->etag == etag);
+            bool sameLm = lastModified.empty() ||
+                          (!saved->lastModified.empty() &&
+                           saved->lastModified == lastModified);
+            ok = sameEtag && sameLm;
+        }
         if (ok) {
             for (const auto& s : saved->segments) {
                 std::int64_t fs = s.start / chunkBytes;
@@ -527,6 +593,8 @@ void HttpClient::segmentedCore(const std::string& url,
         ResumeData rd;
         rd.url = url;
         rd.total = total;
+        rd.etag = etag;
+        rd.lastModified = lastModified;
         rd.segments.reserve(static_cast<size_t>(numSlots / 64) + 16);
         std::int64_t runStart = -1;
         auto flushRun = [&](std::int64_t lastSlot) {

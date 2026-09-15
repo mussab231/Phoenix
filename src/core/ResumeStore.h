@@ -14,6 +14,14 @@ struct SegmentState {
 struct ResumeData {
     std::string url;
     std::int64_t total = -1;
+    // Identity validators: if the server exposes an ETag or Last-Modified for
+    // the resource, we store it and compare on resume. Same URL + same total
+    // does NOT prove the bytes are unchanged (a server can swap content while
+    // keeping size), and resuming onto changed bytes silently corrupts the
+    // file. An empty pair means the server sent neither header; we then fall
+    // back to the URL+total check alone.
+    std::string etag;
+    std::string lastModified;
     // With dynamic re-segmentation there are no fixed per-connection ranges;
     // instead each entry is one COMPLETE byte range [start,end] (done ==
     // end-start+1) that has already been written. The next run re-fetches

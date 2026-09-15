@@ -61,6 +61,9 @@ bool ResumeStore::save(const std::string& statePath, const ResumeData& data) {
         << data.segments.size() << '\n';
     for (const auto& s : data.segments)
         out << s.start << ' ' << s.end << ' ' << s.done << '\n';
+    // Identity validators, written after the segment list so older readers
+    // (and older state files) keep working either way.
+    out << data.etag << '\n' << data.lastModified << '\n';
     out.flush();
     if (!out) {
         out.close();
@@ -117,6 +120,10 @@ std::optional<ResumeData> ResumeStore::load(const std::string& statePath) {
             return std::nullopt;
         data.segments.push_back(s);
     }
+    // Optional tail: ETag and Last-Modified. Missing lines (older state files)
+    // simply leave both empty, which falls back to the URL+total check.
+    if (std::getline(in, data.etag))
+        std::getline(in, data.lastModified);
     return data;
 }
 
