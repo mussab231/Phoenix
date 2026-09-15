@@ -14,9 +14,43 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSpinBox>
 #include <QUrl>
 #include <QVBoxLayout>
+
+namespace {
+
+// Windows forbids these characters in file names; a URL path segment can
+// contain several of them (query strings especially). Left alone they make
+// the open() call fail outright or, worse, get silently mangled.
+QString sanitizeFileName(QString name) {
+    name.remove(QRegularExpression(QStringLiteral(R"([<>:"/\\|?*\x00-\x1f])")));
+    // Windows silently drops trailing dots and spaces, which would make the
+    // on-disk name differ from the one we show and resume-state lookups key on.
+    while (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' ')))
+        name.chop(1);
+    // Reserved DOS device names (CON, PRN, AUX, NUL, COM1..9, LPT1..9) are
+    // usable in paths but never as a real file; opening them hits a device.
+    const QString stem = name.section(QLatin1Char('.'), 0, 0).toUpper();
+    const QSet<QString> reserved = {
+        QStringLiteral("CON"),  QStringLiteral("PRN"),  QStringLiteral("AUX"),
+        QStringLiteral("NUL"),  QStringLiteral("COM1"), QStringLiteral("COM2"),
+        QStringLiteral("COM3"), QStringLiteral("COM4"), QStringLiteral("COM5"),
+        QStringLiteral("COM6"), QStringLiteral("COM7"), QStringLiteral("COM8"),
+        QStringLiteral("COM9"), QStringLiteral("LPT1"), QStringLiteral("LPT2"),
+        QStringLiteral("LPT3"), QStringLiteral("LPT4"), QStringLiteral("LPT5"),
+        QStringLiteral("LPT6"), QStringLiteral("LPT7"), QStringLiteral("LPT8"),
+        QStringLiteral("LPT9")};
+    if (reserved.contains(stem))
+        name = QStringLiteral("download") + name.mid(stem.size());
+    if (name.isEmpty())
+        name = QStringLiteral("download.bin");
+    return name;
+}
+
+} // namespace
 
 AddDialog::AddDialog(QWidget* parent, int defaultSegments,
                      int defaultMaxSpeedKBs, const QString& defaultDir)
@@ -88,7 +122,7 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
     if (!first.empty()) {
         m_urlEdit->setText(QString::fromStdString(first));
         QUrl u(QString::fromStdString(first));
-        QString name = u.fileName();
+        QString name = sanitizeFileName(u.fileName());
         if (name.isEmpty())
             name = QStringLiteral("download.bin");
         if (!m_defaultDir.isEmpty())
