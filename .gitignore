@@ -33,6 +33,9 @@ phoenix_selftest*
 phoenix_reference*
 phoenix_resume*
 
+# Native messaging: machine-generated host manifest (path is machine-specific)
+tools/native/manifest.chrome.json
+
 # OS junk
 Thumbs.db
 .DS_Store

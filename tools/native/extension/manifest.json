@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Phoenix Downloader",
+  "version": "1.0.0",
+  "description": "Sends download links to the Phoenix download manager via the native messaging host.",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "notifications"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Send this page's URL to Phoenix"
+  }
+}

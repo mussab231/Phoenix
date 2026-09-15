@@ -1,6 +1,7 @@
 #include "core/DownloadQueue.h"
 #include "core/HttpClient.h"
 #include "core/HttpListener.h"
+#include "core/NativeHost.h"
 #include "core/PowerControl.h"
 #include "core/ProtocolRegistrar.h"
 #include "core/RateLimiter.h"
@@ -14,15 +15,24 @@
 #include <winsock2.h>
 #include <windows.h>
 
+#include <fcntl.h>
+#include <io.h>
+
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPalette>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleFactory>
 #include <QTimer>
+#include <QUrl>
 
 #include <atomic>
 #include <cstdio>
@@ -780,6 +790,179 @@ int runSettingsTest() {
     return 0;
 }
 
+// Headless Native Messaging Host entry point. The browser launches
+// "Phoenix.exe --native-messaging <origin>" and speaks length-prefixed JSON
+// frames over stdin/stdout. If a Phoenix window is already running, "add"
+// requests are handed to it over the single-instance pipe (so the download
+// shows up in the visible queue); otherwise this process queues them itself.
+int runNativeHost(int argc, char** argv) {
+    QCoreApplication app(argc, argv);
+    app.setOrganizationName(QStringLiteral("Phoenix"));
+    app.setOrganizationDomain(QStringLiteral("phoenix.local"));
+    app.setApplicationName(QStringLiteral("Phoenix"));
+
+    DownloadQueue queue;
+    SettingsStore settings;
+    queue.setMaxConcurrent(settings.maxConcurrent());
+
+    NativeHost host;
+    SingleInstance single; // only used for handoff (tryActivate)
+    bool handedOff = false;
+    QObject::connect(&host, &NativeHost::requestReceived, &app,
+                     [&](const QJsonObject& request) {
+        const bool isAdd =
+            request.value(QStringLiteral("type")).toString() == QStringLiteral("add");
+        if (isAdd && SingleInstance::isOwnerRunning()) {
+            const QString url =
+                request.value(QStringLiteral("url")).toString();
+            const QString name =
+                request.value(QStringLiteral("fileName")).toString();
+            const QUrl parsed(url);
+            const QString nameOrDefault =
+                name.isEmpty() ? parsed.fileName() : name;
+            const std::string link = UrlCodec::buildProtocolLink(
+                url.toStdString(), nameOrDefault.toStdString());
+            if (single.tryActivate(QString::fromStdString(link))) {
+                handedOff = true;
+                host.reply({{QStringLiteral("ok"), true},
+                            {QStringLiteral("method"), QStringLiteral("handoff")}});
+                return;
+            }
+        }
+        const QString dir = settings.defaultDirectory().isEmpty()
+            ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
+            : settings.defaultDirectory();
+        host.reply(NativeHost::handleRequest(request, &queue, dir));
+    });
+    QObject::connect(&host, &NativeHost::connectionClosed, &app,
+                     &QCoreApplication::quit);
+
+    host.start();
+    const int code = app.exec();
+    std::fprintf(stderr, "native-host exited (handedOff=%s)\n",
+                 handedOff ? "yes" : "no");
+    return code;
+}
+
+// Native Messaging Host test: (1) the binary frame protocol round-trips on a
+// real pipe and rejects truncation, (2) the JSON request dispatcher answers
+// ping / add / status / unknown correctly.
+int runNativeHostTest() {
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    // --- frame protocol over anonymous pipes ---
+    HANDLE readH = INVALID_HANDLE_VALUE, writeH = INVALID_HANDLE_VALUE;
+    if (!CreatePipe(&readH, &writeH, nullptr, 0)) {
+        std::printf("NATIVE-TEST FAILED: CreatePipe\n");
+        return 1;
+    }
+    auto osf = [](HANDLE h) {
+        return _open_osfhandle(reinterpret_cast<intptr_t>(h), _O_BINARY);
+    };
+    std::FILE* rf = _fdopen(osf(readH), "rb");
+    std::FILE* wf = _fdopen(osf(writeH), "wb");
+    if (!rf || !wf) {
+        if (rf)
+            std::fclose(rf);
+        if (wf)
+            std::fclose(wf);
+        std::printf("NATIVE-TEST FAILED: _fdopen\n");
+        return 1;
+    }
+
+    auto writeLe = [](std::FILE* f, std::uint32_t v) {
+        unsigned char b[4] = {static_cast<unsigned char>(v & 0xff),
+                              static_cast<unsigned char>((v >> 8) & 0xff),
+                              static_cast<unsigned char>((v >> 16) & 0xff),
+                              static_cast<unsigned char>((v >> 24) & 0xff)};
+        std::fwrite(b, 1, 4, f);
+    };
+
+    const std::string ping = "{\"type\":\"ping\"}";
+    if (!NativeHost::writeFrame(wf, ping)) {
+        std::printf("NATIVE-TEST FAILED: writeFrame\n");
+        return 1;
+    }
+    std::string got;
+    if (!NativeHost::readFrame(rf, &got) || got != ping) {
+        std::printf("NATIVE-TEST FAILED: frame round trip\n");
+        return 1;
+    }
+
+    // Truncated frame: length prefix promises more bytes than we send, then
+    // the write side closes mid-frame -> readFrame must report failure.
+    const std::string body = "{\"type\":\"add\"";
+    writeLe(wf, static_cast<std::uint32_t>(body.size()) + 64);
+    std::fwrite(body.data(), 1, body.size(), wf);
+    std::fflush(wf);
+    std::fclose(wf); // EOF with bytes still promised
+    got.clear();
+    if (NativeHost::readFrame(rf, &got)) {
+        std::printf("NATIVE-TEST FAILED: truncated frame accepted\n");
+        return 1;
+    }
+    std::fclose(rf);
+    std::printf("Frame round trip + truncation rejection: OK\n");
+
+    // --- JSON request dispatcher ---
+    DownloadQueue queue;
+    const std::string dir = tempFile("phoenix_native_dir");
+    QDir().mkpath(QString::fromStdString(dir));
+    const QString qDir = QString::fromStdString(dir);
+
+    auto req = [](const char* json) {
+        return QJsonDocument::fromJson(QByteArray(json)).object();
+    };
+
+    const QJsonObject pong = NativeHost::handleRequest(
+        req(R"({"type":"ping"})"), &queue, qDir);
+    if (!pong.value(QStringLiteral("ok")).toBool() ||
+        !pong.value(QStringLiteral("pong")).toBool()) {
+        std::printf("NATIVE-TEST FAILED: ping\n");
+        return 1;
+    }
+
+    const QJsonObject bad = NativeHost::handleRequest(
+        req(R"({"type":"add","url":""})"), &queue, qDir);
+    if (bad.value(QStringLiteral("ok")).toBool()) {
+        std::printf("NATIVE-TEST FAILED: empty url accepted\n");
+        return 1;
+    }
+
+    const QString url = QStringLiteral("https://example.com/a b.zip");
+    QString addJson = QStringLiteral(R"({"type":"add","url":"%1"})").arg(url);
+    const QJsonObject added = NativeHost::handleRequest(
+        req(addJson.toUtf8().constData()), &queue, qDir);
+    const int addedId = added.value(QStringLiteral("id")).toInt();
+    if (!added.value(QStringLiteral("ok")).toBool() || addedId <= 0) {
+        std::printf("NATIVE-TEST FAILED: add\n");
+        return 1;
+    }
+
+    const QJsonObject status = NativeHost::handleRequest(
+        req(R"({"type":"status"})"), &queue, qDir);
+    const QJsonArray items =
+        status.value(QStringLiteral("items")).toArray();
+    if (!status.value(QStringLiteral("ok")).toBool() || items.isEmpty() ||
+        items.first().toObject().value(QStringLiteral("id")).toInt() != addedId) {
+        std::printf("NATIVE-TEST FAILED: status missing the added item\n");
+        return 1;
+    }
+
+    const QJsonObject unknown = NativeHost::handleRequest(
+        req(R"({"type":"explode"})"), &queue, qDir);
+    if (unknown.value(QStringLiteral("ok")).toBool()) {
+        std::printf("NATIVE-TEST FAILED: unknown type accepted\n");
+        return 1;
+    }
+
+    std::printf("NATIVE-TEST OK\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -807,6 +990,10 @@ int main(int argc, char** argv) {
             return runUrlMatchTest();
         if (arg == "--self-test-settings")
             return runSettingsTest();
+        if (arg == "--self-test-native")
+            return runNativeHostTest();
+        if (arg == "--native-messaging")
+            return runNativeHost(argc, argv);
         if (arg == "--register")
             return ProtocolRegistrar::registerHandler() ? 0 : 1;
         if (arg == "--unregister")

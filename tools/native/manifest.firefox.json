@@ -1,0 +1,9 @@
+{
+  "name": "com.phoenix.host",
+  "description": "Hands download links to the Phoenix download manager.",
+  "path": "C:\\path\\to\\Phoenix.exe",
+  "type": "stdio",
+  "allowed_extensions": [
+    "phoenix@example.com"
+  ]
+}

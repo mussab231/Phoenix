@@ -34,7 +34,8 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | Single-instance: a running Phoenix receives `phoenix://` links from new OS-launched instances | ✅ |
 | **Persistent settings**: default folder, connections, max speed, concurrency, when-done action, clipboard watch and window position are saved and restored | ✅ |
 | **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
-| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`) | ✅ |
+| **Native Messaging Host + browser extension** (`tools/native/`): right-click any link -> "Send link to Phoenix"; hands off to the running window or queues itself | ✅ |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`) | ✅ |
 
 ## 🛠️ Requirements
 
@@ -70,7 +71,8 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 .\build\Phoenix.exe --self-test-listen  # local HTTP listener (/add + /status round-trip)
 .\build\Phoenix.exe --self-test-proto   # phoenix:// encode/decode round trip
 .\build\Phoenix.exe --self-test-urlmatch # URL classification for clipboard catching
-.\build\Phoenix.exe --self-test-settings # saved-preferences round trip (defaults, clamp, persist)
+.build\Phoenix.exe --self-test-settings # saved-preferences round trip (defaults, clamp, persist)
+.\build\Phoenix.exe --self-test-native  # native-messaging frames on a real pipe + JSON dispatcher
 .\build\Phoenix.exe --register         # register phoenix:// handler in HKCU (also done on first GUI launch)
 .\build\Phoenix.exe --unregister       # remove the protocol registration
 ```
@@ -100,6 +102,8 @@ Phoenix/
 │   │   ├── UrlMatcher.*      # URL classification (isDownloadUrl, extractFirstUrl)
 │   │   ├── ProtocolRegistrar.* # registers phoenix:// handler in HKCU on first launch
 │   │   └── PowerControl.*    # sleep / hibernate / shutdown (test mode built in)
+│   │   ├── SessionStore.*     # persists the in-flight queue to disk on close
+│   │   ├── NativeHost.*       # native-messaging host: browser <-> Phoenix over stdin/stdout
 │   ├── models/
 │   │   ├── DownloadTask.h
 │   │   └── DownloadItem.h    # one queue entry
@@ -108,7 +112,8 @@ Phoenix/
 │       ├── AddDialog.*       # new-download dialog
 │       └── theme.qss         # dark Phoenix style sheet
 ├── tools/
-│   └── make_icon/            # dev tool: SVG -> PNG sizes + .ico (needs qt6-svg)
+│   ├── make_icon/            # dev tool: SVG -> PNG sizes + .ico (needs qt6-svg)
+│   └── native/               # browser integration: install.ps1 + MV3 extension
 └── .vscode/                  # build / run / debug tasks
 ```
 
