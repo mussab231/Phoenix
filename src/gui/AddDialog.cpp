@@ -1,20 +1,27 @@
 #include "gui/AddDialog.h"
 
+#include "core/UrlMatcher.h"
+#include "gui/I18n.h"
+
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDateTimeEdit>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QUrl>
 #include <QVBoxLayout>
 
 AddDialog::AddDialog(QWidget* parent, int defaultSegments,
                      int defaultMaxSpeedKBs, const QString& defaultDir)
     : QDialog(parent), m_defaultDir(defaultDir) {
-    setWindowTitle(QStringLiteral("Add download"));
+    setWindowTitle(I18n::t("Add download"));
     resize(520, 200);
 
     auto* layout = new QVBoxLayout(this);
@@ -25,32 +32,32 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
 
     m_urlEdit = new QLineEdit(this);
     m_urlEdit->setPlaceholderText(QStringLiteral("https://example.com/file.zip"));
-    form->addRow(QStringLiteral("URL:"), m_urlEdit);
+    form->addRow(I18n::t("URL:"), m_urlEdit);
 
     auto* pathRow = new QWidget(this);
     auto* pathLayout = new QHBoxLayout(pathRow);
     pathLayout->setContentsMargins(0, 0, 0, 0);
     m_pathEdit = new QLineEdit(pathRow);
-    auto* browseBtn = new QPushButton(QStringLiteral("Browse..."), pathRow);
+    auto* browseBtn = new QPushButton(I18n::t("Browse..."), pathRow);
     pathLayout->addWidget(m_pathEdit);
     pathLayout->addWidget(browseBtn);
-    form->addRow(QStringLiteral("Save to:"), pathRow);
+    form->addRow(I18n::t("Save to:"), pathRow);
 
     m_segmentsBox = new QSpinBox(this);
     m_segmentsBox->setRange(1, 16);
     m_segmentsBox->setValue(defaultSegments);
-    form->addRow(QStringLiteral("Connections:"), m_segmentsBox);
+    form->addRow(I18n::t("Connections:"), m_segmentsBox);
 
     m_speedBox = new QSpinBox(this);
     m_speedBox->setRange(0, 100000); // KB/s
     m_speedBox->setValue(defaultMaxSpeedKBs);
     m_speedBox->setSuffix(QStringLiteral(" KB/s"));
-    m_speedBox->setSpecialValueText(QStringLiteral("Unlimited"));
+    m_speedBox->setSpecialValueText(I18n::t("Unlimited"));
     m_speedBox->setToolTip(
-        QStringLiteral("Maximum download speed. Unlimited by default."));
-    form->addRow(QStringLiteral("Max speed:"), m_speedBox);
+        I18n::t("Maximum download speed. Unlimited by default."));
+    form->addRow(I18n::t("Max speed:"), m_speedBox);
 
-    m_scheduleCheck = new QCheckBox(QStringLiteral("Start later"), this);
+    m_scheduleCheck = new QCheckBox(I18n::t("Start later"), this);
     m_scheduleEdit =
         new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600), this);
     m_scheduleEdit->setCalendarPopup(true);
@@ -73,6 +80,20 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
             accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+    // Convenience: a copy of a download URL typically sits in the clipboard,
+    // so pre-fill both the URL and the target name from it.
+    const QString clipText = QGuiApplication::clipboard()->text();
+    const std::string first = UrlMatcher::extractFirstUrl(clipText.toStdString());
+    if (!first.empty()) {
+        m_urlEdit->setText(QString::fromStdString(first));
+        QUrl u(QString::fromStdString(first));
+        QString name = u.fileName();
+        if (name.isEmpty())
+            name = QStringLiteral("download.bin");
+        if (!m_defaultDir.isEmpty())
+            m_pathEdit->setText(QDir(m_defaultDir).filePath(name));
+    }
 
     m_urlEdit->setFocus();
 }
@@ -103,7 +124,7 @@ qint64 AddDialog::scheduledAt() const {
 
 void AddDialog::onBrowse() {
     QString file = QFileDialog::getSaveFileName(
-        this, QStringLiteral("Save as"),
+        this, I18n::t("Save as"),
         m_defaultDir.isEmpty() ? QString() : m_defaultDir + QStringLiteral("/download.bin"));
     if (!file.isEmpty())
         m_pathEdit->setText(file);

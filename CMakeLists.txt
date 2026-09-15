@@ -40,6 +40,7 @@ add_executable(Phoenix
     src/gui/MainWindow.cpp
     src/gui/AddDialog.cpp
     src/gui/SettingsDialog.cpp
+    src/gui/I18n.cpp
     Phoenix.qrc
     ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )

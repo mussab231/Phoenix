@@ -1,5 +1,6 @@
 #include "core/SettingsStore.h"
 
+#include <QCoreApplication>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -73,4 +74,36 @@ QByteArray SettingsStore::mainGeometry() const {
 
 void SettingsStore::setMainGeometry(const QByteArray& geometry) {
     m_s->setValue(QStringLiteral("window/geometry"), geometry);
+}
+
+int SettingsStore::language() const {
+    return qBound(0, m_s->value(QStringLiteral("ui/language"), 0).toInt(), 2);
+}
+
+void SettingsStore::setLanguage(int lang) {
+    m_s->setValue(QStringLiteral("ui/language"), qBound(0, lang, 2));
+}
+
+bool SettingsStore::autoStart() const {
+    return m_s->value(QStringLiteral("ui/autoStart"), false).toBool();
+}
+
+void SettingsStore::setAutoStart(bool on) {
+    m_s->setValue(QStringLiteral("ui/autoStart"), on);
+    // Mirrors the choice into the Windows "Run" key so it survives a reboot.
+    QSettings run(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\"
+                                 "Windows\\CurrentVersion\\Run"),
+                  QSettings::NativeFormat);
+    if (on)
+        run.setValue(QStringLiteral("Phoenix"), QStringLiteral("\"%1\"").arg(QCoreApplication::applicationFilePath()));
+    else
+        run.remove(QStringLiteral("Phoenix"));
+}
+
+bool SettingsStore::startMinimized() const {
+    return m_s->value(QStringLiteral("ui/startMinimized"), false).toBool();
+}
+
+void SettingsStore::setStartMinimized(bool on) {
+    m_s->setValue(QStringLiteral("ui/startMinimized"), on);
 }

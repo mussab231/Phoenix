@@ -1,3 +1,4 @@
+#include "gui/I18n.h"
 #include "gui/MainWindow.h"
 
 #include "core/ClipboardWatcher.h"
@@ -11,6 +12,7 @@
 
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -31,6 +33,7 @@
 #include <QWidget>
 
 #include <cstring>
+#include <vector>
 
 namespace {
 constexpr int kColFile = 0;
@@ -54,39 +57,41 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* layout = new QVBoxLayout(central);
 
     auto* topRow = new QHBoxLayout();
-    m_addBtn = new QPushButton(QStringLiteral("Add"), central);
+    m_addBtn = new QPushButton(I18n::t("Add"), central);
     m_addBtn->setProperty("accent", true);
-    m_pauseBtn = new QPushButton(QStringLiteral("Pause"), central);
-    m_resumeBtn = new QPushButton(QStringLiteral("Resume"), central);
-    m_removeBtn = new QPushButton(QStringLiteral("Remove"), central);
-    auto* settingsBtn = new QPushButton(QStringLiteral("Settings"), central);
-    m_pauseBtn->setToolTip(QStringLiteral("Pause the selected download (resumable)"));
-    m_resumeBtn->setToolTip(QStringLiteral("Resume the selected download"));
-    m_removeBtn->setToolTip(QStringLiteral("Remove the selected download from the queue"));
-    settingsBtn->setToolTip(QStringLiteral("Saved preferences: folder, connections, speed, power, clipboard"));
+    m_pauseBtn = new QPushButton(I18n::t("Pause"), central);
+    m_resumeBtn = new QPushButton(I18n::t("Resume"), central);
+    m_removeBtn = new QPushButton(I18n::t("Remove"), central);
+    auto* settingsBtn = new QPushButton(I18n::t("Settings"), central);
+    auto* clearBtn = new QPushButton(I18n::t("Clear completed"), central);
+    m_pauseBtn->setToolTip(I18n::t("Pause the selected download (resumable)"));
+    m_resumeBtn->setToolTip(I18n::t("Resume the selected download"));
+    m_removeBtn->setToolTip(I18n::t("Remove the selected download from the queue"));
+    settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
     topRow->addWidget(m_addBtn);
     topRow->addWidget(m_pauseBtn);
     topRow->addWidget(m_resumeBtn);
     topRow->addWidget(m_removeBtn);
     topRow->addWidget(settingsBtn);
+    topRow->addWidget(clearBtn);
     topRow->addStretch(1);
-    topRow->addWidget(new QLabel(QStringLiteral("Max simultaneous:"), central));
+    topRow->addWidget(new QLabel(I18n::t("Max simultaneous:"), central));
     m_maxBox = new QSpinBox(central);
     m_maxBox->setRange(1, 5);
     m_maxBox->setValue(3);
     topRow->addWidget(m_maxBox);
     topRow->addSpacing(12);
-    topRow->addWidget(new QLabel(QStringLiteral("When done:"), central));
+    topRow->addWidget(new QLabel(I18n::t("When done:"), central));
     m_doneBox = new QComboBox(central);
-    m_doneBox->addItems({QStringLiteral("Do nothing"), QStringLiteral("Sleep"),
-                         QStringLiteral("Hibernate"), QStringLiteral("Shutdown")});
+    m_doneBox->addItems({I18n::t("Do nothing"), I18n::t("Sleep"),
+                         I18n::t("Hibernate"), I18n::t("Shutdown")});
     topRow->addWidget(m_doneBox);
     layout->addLayout(topRow);
 
     m_table = new QTableWidget(0, 5, central);
     m_table->setHorizontalHeaderLabels(
-        {QStringLiteral("File"), QStringLiteral("Size"), QStringLiteral("Progress"),
-         QStringLiteral("Speed"), QStringLiteral("Status")});
+        {I18n::t("File"), I18n::t("Size"), I18n::t("Progress"),
+         I18n::t("Speed"), I18n::t("Status")});
     m_table->horizontalHeader()->setSectionResizeMode(kColFile, QHeaderView::Stretch);
     m_table->setSelectionBehavior(QTableWidget::SelectRows);
     m_table->setEditTriggers(QTableWidget::NoEditTriggers);
@@ -101,6 +106,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_resumeBtn, &QPushButton::clicked, this, &MainWindow::onResume);
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
     connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
+    connect(clearBtn, &QPushButton::clicked, this, &MainWindow::clearCompleted);
     connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
             &DownloadQueue::setMaxConcurrent);
     connect(m_doneBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -114,6 +120,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_queue, &DownloadQueue::queueFinished, statusBar(),
             [this] { refreshStatus(); });
 
+    // Double-click a row to reveal its folder in Explorer.
+    connect(m_table, &QTableWidget::cellDoubleClicked, this,
+            [this](int row, int) {
+                QTableWidgetItem* item = m_table->item(row, kColFile);
+                if (!item)
+                    return;
+                const int id = item->data(Qt::UserRole).toInt();
+                for (const auto& it : m_queue->items()) {
+                    if (it.id == id) {
+                        const QFileInfo fi(QString::fromStdString(it.outputPath));
+                        if (it.state == DownloadState::Completed && fi.exists())
+                            QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absoluteFilePath()));
+                        else
+                            QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
+                        break;
+                    }
+                }
+            });
+
     // Clipboard link catching (off until the user enables it from the tray).
     m_clipWatcher = new ClipboardWatcher(this);
     connect(m_clipWatcher, &ClipboardWatcher::urlDetected, this,
@@ -122,7 +147,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 if (m_tray)
                     m_tray->showMessage(
                         QStringLiteral("Phoenix"),
-                        QStringLiteral("Download added from clipboard:\n%1").arg(url),
+                        I18n::t("Download added from clipboard:\n%1").arg(url),
                         QSystemTrayIcon::Information, 4000);
             });
 
@@ -149,33 +174,36 @@ void MainWindow::setupTray() {
 
     QIcon icon = windowIcon();
     m_tray = new QSystemTrayIcon(icon, this);
-    m_tray->setToolTip(QStringLiteral("Phoenix Download Manager"));
+    m_tray->setToolTip(I18n::t("Phoenix Download Manager"));
 
     m_trayMenu = new QMenu(this);
-    QAction* showAct = m_trayMenu->addAction(QStringLiteral("Show / Hide"));
+    QAction* showAct = m_trayMenu->addAction(I18n::t("Show / Hide"));
     connect(showAct, &QAction::triggered, this, &MainWindow::showWindow);
     m_trayMenu->addSeparator();
 
-    QAction* addAct = m_trayMenu->addAction(QStringLiteral("Add Download..."));
+    QAction* addAct = m_trayMenu->addAction(I18n::t("Add Download..."));
     connect(addAct, &QAction::triggered, this, &MainWindow::onAdd);
 
-    QAction* settingsAct = m_trayMenu->addAction(QStringLiteral("Settings..."));
+    QAction* settingsAct = m_trayMenu->addAction(I18n::t("Settings..."));
     connect(settingsAct, &QAction::triggered, this, &MainWindow::onSettings);
 
-    QAction* pauseAll = m_trayMenu->addAction(QStringLiteral("Pause All"));
+    QAction* clearAct = m_trayMenu->addAction(I18n::t("Clear completed"));
+    connect(clearAct, &QAction::triggered, this, &MainWindow::clearCompleted);
+
+    QAction* pauseAll = m_trayMenu->addAction(I18n::t("Pause All"));
     connect(pauseAll, &QAction::triggered, this, [this] {
         for (auto it : m_queue->items())
             m_queue->pauseDownload(it.id);
     });
 
-    QAction* resumeAll = m_trayMenu->addAction(QStringLiteral("Resume All"));
+    QAction* resumeAll = m_trayMenu->addAction(I18n::t("Resume All"));
     connect(resumeAll, &QAction::triggered, this, [this] {
         for (auto it : m_queue->items())
             if (it.state == DownloadState::Paused)
                 m_queue->resumeDownload(it.id);
     });
 
-    QAction* watchClip = m_trayMenu->addAction(QStringLiteral("Watch clipboard for links"));
+    QAction* watchClip = m_trayMenu->addAction(I18n::t("Watch clipboard for links"));
     watchClip->setCheckable(true);
     watchClip->setChecked(m_settings->watchClipboard());
     m_watchClipAct = watchClip;
@@ -187,7 +215,7 @@ void MainWindow::setupTray() {
     });
 
     m_trayMenu->addSeparator();
-    QAction* quitAct = m_trayMenu->addAction(QStringLiteral("Quit"));
+    QAction* quitAct = m_trayMenu->addAction(I18n::t("Quit"));
     connect(quitAct, &QAction::triggered, this, [this] {
         QSystemTrayIcon* t = m_tray;
         m_tray = nullptr; // allow closeEvent to actually quit
@@ -213,6 +241,11 @@ void MainWindow::showWindow() {
     activateWindow();
 }
 
+bool MainWindow::startsHidden() const {
+    return m_settings && m_settings->startMinimized() && m_tray &&
+           QSystemTrayIcon::isSystemTrayAvailable();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
     // Closing hides to the tray instead of quitting (unless the user asked to
     // quit from the tray menu, which clears m_tray first).
@@ -221,8 +254,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             m_firstHide = false;
             m_tray->showMessage(
                 QStringLiteral("Phoenix"),
-                QStringLiteral("Still running in the tray. Right-click the "
-                               "icon for options."),
+                I18n::t("Still running in the tray. Right-click the "
+                        "icon for options."),
                 QSystemTrayIcon::Information, 4000);
         }
         hide();
@@ -308,6 +341,15 @@ void MainWindow::onRemove() {
         m_queue->removeDownload(id);
 }
 
+void MainWindow::clearCompleted() {
+    std::vector<int> done;
+    for (const auto& it : m_queue->items())
+        if (it.state == DownloadState::Completed)
+            done.push_back(it.id);
+    for (int id : done)
+        m_queue->removeDownload(id);
+}
+
 void MainWindow::onItemAdded(int id) {
     int row = m_table->rowCount();
     m_table->insertRow(row);
@@ -324,6 +366,17 @@ void MainWindow::onItemAdded(int id) {
 
 void MainWindow::onItemChanged(int id) {
     updateRow(id);
+    for (const auto& it : m_queue->items()) {
+        if (it.id == id && it.state == DownloadState::Completed) {
+            if (m_tray)
+                m_tray->showMessage(
+                    QStringLiteral("Phoenix"),
+                    I18n::t("Download complete:\n%1")
+                        .arg(baseName(QString::fromStdString(it.outputPath))),
+                    QSystemTrayIcon::Information, 4000);
+            break;
+        }
+    }
 }
 
 void MainWindow::onItemRemoved(int id) {
@@ -367,14 +420,24 @@ void MainWindow::updateRow(int id) {
 
     m_table->item(row, kColFile)
         ->setText(baseName(QString::fromStdString(data.outputPath)));
-    m_table->item(row, kColSize)
-        ->setText(data.totalBytes > 0 ? formatSize(data.totalBytes) : QStringLiteral("?"));
+    if (data.totalBytes > 0) {
+        const QString total = formatSize(data.totalBytes);
+        if (data.state == DownloadState::Running ||
+            data.state == DownloadState::Idle)
+            m_table->item(row, kColSize)
+                ->setText(formatSize(data.receivedBytes) + QStringLiteral(" / ") + total);
+        else
+            m_table->item(row, kColSize)->setText(total);
+    } else {
+        m_table->item(row, kColSize)->setText(QStringLiteral("?"));
+    }
 
     auto* bar = qobject_cast<QProgressBar*>(m_table->cellWidget(row, kColProgress));
     if (bar) {
         if (data.totalBytes > 0) {
             bar->setRange(0, 100);
             bar->setValue(static_cast<int>(data.receivedBytes * 100 / data.totalBytes));
+            bar->setFormat(QStringLiteral("%p%"));
         } else {
             bar->setRange(0, 0); // unknown size: busy indicator
         }
@@ -383,7 +446,7 @@ void MainWindow::updateRow(int id) {
     m_table->item(row, kColSpeed)
         ->setText(data.speedBps > 0 ? formatSpeed(data.speedBps) : QString());
     m_table->item(row, kColStatus)
-        ->setText(QString::fromStdString(data.statusText));
+        ->setText(I18n::status(QString::fromStdString(data.statusText)));
 }
 
 void MainWindow::refreshStatus() {
@@ -398,12 +461,12 @@ void MainWindow::refreshStatus() {
         case DownloadState::Cancelled: break;
         }
     }
-    QString msg = QStringLiteral("Running: %1   Queued: %2   Completed: %3")
+    QString msg = I18n::t("Running: %1   Queued: %2   Completed: %3")
                       .arg(running).arg(queued).arg(done);
     if (paused)
-        msg += QStringLiteral("   Paused: %1").arg(paused);
+        msg += I18n::t("   Paused: %1").arg(paused);
     if (failed)
-        msg += QStringLiteral("   Failed: %1").arg(failed);
+        msg += I18n::t("   Failed: %1").arg(failed);
     statusBar()->showMessage(msg);
 }
 

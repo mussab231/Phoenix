@@ -9,6 +9,7 @@
 #include "core/SingleInstance.h"
 #include "core/UrlCodec.h"
 #include "core/UrlMatcher.h"
+#include "gui/I18n.h"
 #include "gui/MainWindow.h"
 #include "models/DownloadItem.h"
 
@@ -27,6 +28,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QPalette>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -1063,6 +1065,17 @@ int main(int argc, char** argv) {
     app.setOrganizationDomain(QStringLiteral("phoenix.local"));
     app.setApplicationName(QStringLiteral("Phoenix"));
 
+    // UI language: explicit override from Settings, else follow the system
+    // locale. Arabic flips the whole UI to right-to-left. Must run before any
+    // widget is constructed.
+    SettingsStore uiPrefs;
+    const int lang = uiPrefs.language();
+    const bool arabic =
+        lang == 2 || (lang == 0 && QLocale::system().language() == QLocale::Arabic);
+    I18n::setArabic(arabic);
+    if (arabic)
+        app.setLayoutDirection(Qt::RightToLeft);
+
     QIcon windowIcon;
     for (int s : {16, 24, 32, 48, 64, 128, 256})
         windowIcon.addFile(QStringLiteral(":/icons/phoenix-%1.png").arg(s));
@@ -1108,11 +1121,12 @@ int main(int argc, char** argv) {
     quint16 port = listener.start(51047);
     if (port)
         w.statusBar()->showMessage(
-            QStringLiteral("Link catcher ready: "
-                           "http://127.0.0.1:%1/add?token=%2 (and phoenix:// links)")
+            I18n::t("Link catcher ready: "
+                    "http://127.0.0.1:%1/add?token=%2 (and phoenix:// links)")
                 .arg(port)
                 .arg(listener.token()));
 
-    w.show();
+    if (!w.startsHidden())
+        w.show();
     return app.exec();
 }

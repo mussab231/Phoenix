@@ -24,6 +24,10 @@ public:
 
     DownloadQueue* queue() const { return m_queue; }
 
+    // True when the window should boot hidden into the tray instead of
+    // showing (start-minimized preference). main() checks this before show().
+    bool startsHidden() const;
+
     // Adds a url handed to us from outside (phoenix:// link, HTTP listener,
     // clipboard). fileName (optional) is used as the target filename.
     void acceptIncomingUrl(const QString& url, const QString& fileName = {});
@@ -53,6 +57,7 @@ private:
     void saveSession();
     void setupTray();
     void applySettingsToUi();
+    void clearCompleted();
     static QString formatSize(qint64 bytes);
     static QString formatSpeed(double bytesPerSec);
     static QString baseName(const QString& path);

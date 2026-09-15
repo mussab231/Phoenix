@@ -28,4 +28,7 @@ private:
     QSpinBox* m_speedBox = nullptr;
     QComboBox* m_doneBox = nullptr;
     QCheckBox* m_watchClip = nullptr;
+    QComboBox* m_langBox = nullptr;
+    QCheckBox* m_autoStart = nullptr;
+    QCheckBox* m_startMinimized = nullptr;
 };

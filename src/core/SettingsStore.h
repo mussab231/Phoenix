@@ -42,6 +42,16 @@ public:
     QByteArray mainGeometry() const;
     void setMainGeometry(const QByteArray& geometry);
 
+    // Language: 0 = system (auto), 1 = English, 2 = Arabic.
+    int language() const;
+    void setLanguage(int lang);
+
+    bool autoStart() const;     // launch Phoenix with Windows (HKCU\...\Run)
+    void setAutoStart(bool on);
+
+    bool startMinimized() const; // start hidden to tray
+    void setStartMinimized(bool on);
+
 private:
     std::unique_ptr<QSettings> m_s;
 };
