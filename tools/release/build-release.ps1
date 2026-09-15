@@ -32,8 +32,13 @@ if ($LASTEXITCODE -ne 0) { throw "ninja build failed" }
 if (Test-Path $DistDir) { Remove-Item -Recurse -Force $DistDir }
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 Copy-Item (Join-Path $BuildDir "Phoenix.exe") (Join-Path $DistDir "Phoenix.exe")
+# windeployqt prints a harmless dxcompiler warning to stderr; keep it from
+# tripping $ErrorActionPreference="Stop" and rely on $LASTEXITCODE instead.
+$oldEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $Windeployqt --release --no-translations --no-system-d3d-compiler `
-    --no-opengl-sw (Join-Path $DistDir "Phoenix.exe")
+    --no-opengl-sw (Join-Path $DistDir "Phoenix.exe") 2>&1 | ForEach-Object { "$_" }
+$ErrorActionPreference = $oldEap
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
 # windeployqt does not grab the MinGW C/C++ runtime - copy it explicitly.

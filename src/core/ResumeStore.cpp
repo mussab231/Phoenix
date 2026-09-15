@@ -4,9 +4,29 @@
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace {
 
 constexpr char kMagic[] = "PHX2";
+
+#ifdef _WIN32
+// UTF-8 byte string -> wide string for the Win32 rename calls below.
+std::wstring wideUtf8(const std::string& s) {
+    if (s.empty())
+        return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(),
+                                static_cast<int>(s.size()), nullptr, 0);
+    if (n <= 0)
+        return {};
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(),
+                        n);
+    return w;
+}
+#endif
 
 bool parseInt64(const std::string& s, std::int64_t& out) {
     try {
@@ -28,15 +48,41 @@ std::string ResumeStore::statePathFor(const std::string& outputPath) {
 }
 
 bool ResumeStore::save(const std::string& statePath, const ResumeData& data) {
-    std::ofstream out(statePath, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
+    // Write to a sibling temp file first, flush it to disk, then atomically
+    // rename over the real path. A crash mid-write can therefore never leave
+    // a truncated/corrupt ".phoenix-state" file behind.
+    const std::string tmpPath = statePath + ".tmp";
+    std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        std::remove(tmpPath.c_str());
         return false;
+    }
     out << kMagic << '\n' << data.url << '\n' << data.total << '\n'
         << data.segments.size() << '\n';
     for (const auto& s : data.segments)
         out << s.start << ' ' << s.end << ' ' << s.done << '\n';
+    out.flush();
+    if (!out) {
+        out.close();
+        std::remove(tmpPath.c_str());
+        return false;
+    }
     out.close();
-    return static_cast<bool>(out);
+#ifdef _WIN32
+    // MoveFileExW with REPLACE_EXISTING is atomic on the same volume.
+    if (!MoveFileExW(wideUtf8(tmpPath).c_str(), wideUtf8(statePath).c_str(),
+                     MOVEFILE_REPLACE_EXISTING)) {
+        std::remove(tmpPath.c_str());
+        return false;
+    }
+    return true;
+#else
+    if (std::rename(tmpPath.c_str(), statePath.c_str()) != 0) {
+        std::remove(tmpPath.c_str());
+        return false;
+    }
+    return true;
+#endif
 }
 
 std::optional<ResumeData> ResumeStore::load(const std::string& statePath) {
