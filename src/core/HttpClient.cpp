@@ -28,7 +28,7 @@ std::wstring toWide(const std::string& s) {
     return w;
 }
 
-[[noreturn]] void fail(const char* what) {
+[[noreturn]] void fail(const std::string& what) {
     throw std::runtime_error(std::string(what) + " (Win32 error " +
                              std::to_string(GetLastError()) + ")");
 }
@@ -125,6 +125,43 @@ DWORD queryStatus(HINTERNET hRequest) {
     return status;
 }
 
+// Parse "bytes X-Y/TOTAL" from a 206 response into [rangeStart, rangeEnd]
+// and the full resource size. Returns false if the header is missing or
+// malformed. This is how we verify a worker actually received the byte range
+// it asked for, instead of trusting a bare 206 status code.
+bool queryContentRange(HINTERNET hRequest, std::int64_t& rangeStart,
+                       std::int64_t& rangeEnd, std::int64_t& total) {
+    wchar_t buf[96]{};
+    DWORD bufLen = sizeof(buf);
+    if (!WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_RANGE,
+                             WINHTTP_HEADER_NAME_BY_INDEX, buf, &bufLen,
+                             WINHTTP_NO_HEADER_INDEX))
+        return false;
+    std::wstring text = buf;
+    if (text.rfind(L"bytes ", 0) != 0)
+        return false;
+    text.erase(0, 6);
+    const auto slash = text.find(L'/');
+    if (slash == std::wstring::npos)
+        return false;
+    const auto dash = text.find(L'-');
+    if (dash == std::wstring::npos || dash > slash)
+        return false;
+    try {
+        rangeStart = static_cast<std::int64_t>(std::stoll(text.substr(0, dash)));
+        rangeEnd = static_cast<std::int64_t>(
+            std::stoll(text.substr(dash + 1, slash - dash - 1)));
+        const std::wstring tot = text.substr(slash + 1);
+        total = (tot == L"*") ? -1
+                              : static_cast<std::int64_t>(std::stoll(tot));
+    } catch (...) {
+        return false;
+    }
+    if (rangeStart < 0 || rangeEnd < rangeStart)
+        return false;
+    return true;
+}
+
 // String form (not FLAG_NUMBER) so files > 4 GB still parse. -1 if absent.
 std::int64_t queryContentLength(HINTERNET hRequest) {
     wchar_t buf[64]{};
@@ -210,6 +247,16 @@ std::int64_t streamRange(Session& session, const UrlParts& parts,
                                  std::to_string(status));
     }
 
+    // A bare 206 tells us "some range", not "the range we asked for". A broken
+    // or lying server can return a different byte span while still answering
+    // 206; trusting it would silently corrupt the file. Verify the Content-Range
+    // header actually matches the requested [from, to] before writing anything.
+    std::int64_t crStart = -1, crEnd = -1, crTotal = -1;
+    if (!queryContentRange(hRequest, crStart, crEnd, crTotal))
+        throw std::runtime_error("Server returned a malformed Content-Range");
+    if (crStart != from || crEnd != to)
+        throw std::runtime_error("Server returned the wrong byte range");
+
     std::ofstream out(outputPath, std::ios::binary | std::ios::in | std::ios::out);
     if (!out.is_open())
         throw std::runtime_error("Cannot open output file: " + outputPath);
@@ -250,20 +297,51 @@ std::atomic<int> HttpClient::g_testFakeFailures{0};
 
 std::int64_t HttpClient::getFileSize(const std::string& url) {
     UrlParts parts = crackUrl(url);
-    Session session(parts);
-    HINTERNET hRequest = session.openRequest(parts, L"HEAD");
+    // Some servers/CDNs answer HEAD with no Content-Length (or a bogus one),
+    // or reject HEAD outright. Instead of failing the whole download, fall
+    // back to asking for a single byte via GET and read the true size from
+    // Content-Range; anything that serves Range to the segmented downloader
+    // necessarily also answers this probe.
+    try {
+        Session session(parts);
+        HINTERNET hRequestHttp = session.openRequest(parts, L"HEAD");
+        if (WinHttpSendRequest(hRequestHttp, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                               WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+            WinHttpReceiveResponse(hRequestHttp, nullptr)) {
+            const DWORD status = queryStatus(hRequestHttp);
+            const std::int64_t len = (status == 200)
+                                         ? queryContentLength(hRequestHttp)
+                                         : -1;
+            if (len >= 0) {
+                // HEAD worked and gave us a real size — use it and bail earlyso
+                // the segmented path never pays for an extra round-trip.
+                return len;
+            }
+        }
+    } catch (...) {
+        // fall through to the GET-byte probe below
+    }
 
+    Session probe(parts);
+    HINTERNET hRequest = probe.openRequest(parts, L"GET");
+    const wchar_t* range = L"Range: bytes=0-0";
+    if (!WinHttpAddRequestHeaders(hRequest, range, static_cast<DWORD>(-1),
+                                  WINHTTP_ADDREQ_FLAG_ADD))
+        fail("Range probe header failed");
     if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        fail("HEAD send failed");
+        fail("Range probe send failed");
     if (!WinHttpReceiveResponse(hRequest, nullptr))
-        fail("HEAD response failed");
+        fail("Range probe response failed");
 
-    DWORD status = queryStatus(hRequest);
-    if (status != 200)
-        throw std::runtime_error("HEAD request returned HTTP " + std::to_string(status));
+    const DWORD status = queryStatus(hRequest);
+    if (status != 206)
+        fail("Range probe returned HTTP " + std::to_string(status));
 
-    return queryContentLength(hRequest);
+    std::int64_t rs = -1, re = -1, rt = -1;
+    if (!queryContentRange(hRequest, rs, re, rt) || rt < 0)
+        fail("Range probe returned no usable Content-Range");
+    return rt;
 }
 
 bool HttpClient::supportsRanges(const std::string& url) {
