@@ -1,5 +1,6 @@
 #include "core/HttpClient.h"
 
+#include "core/DownloadError.h"
 #include "core/RateLimiter.h"
 #include "core/ResumeStore.h"
 
@@ -22,7 +23,7 @@ std::wstring toWide(const std::string& s) {
         return {};
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
     if (n <= 0)
-        throw std::runtime_error("URL encoding failed");
+        throw DownloadError(DownloadError::Category::Local, "URL encoding failed");
     std::wstring w(static_cast<size_t>(n) - 1, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
     return w;
@@ -41,9 +42,10 @@ std::string toUtf8(const std::wstring& w) {
     return s;
 }
 
-[[noreturn]] void fail(const std::string& what) {
-    throw std::runtime_error(std::string(what) + " (Win32 error " +
-                             std::to_string(GetLastError()) + ")");
+[[noreturn]] void fail(const std::string& what,
+                       DownloadError::Category cat = DownloadError::Category::Local) {
+    throw DownloadError(cat, what + " (Win32 error " +
+                              std::to_string(GetLastError()) + ")");
 }
 
 struct UrlParts {
@@ -197,18 +199,11 @@ std::int64_t fileSizeOnDisk(const std::string& path) {
     return static_cast<std::int64_t>(in.tellg());
 }
 
-// Is this failure worth retrying? Cancellations, HTTP status errors, invalid
-// URLs and local disk problems are permanent; everything else (WinHTTP
-// socket/connection level, timeouts, simulated errors) gets a retry chance.
-bool isTransient(const std::string& msg) {
-    const auto has = [&](const char* needle) {
-        return msg.find(needle) != std::string::npos;
-    };
-    if (has("cancelled") || has("HTTP ") || has("Invalid URL") ||
-        has("encoding failed") || has("Cannot open") || has("preallocate") ||
-        has("Disk write") || has("seek"))
-        return false;
-    return true;
+// Is this failure worth retrying? Now answered by the error's own category
+// rather than by pattern-matching the message text: rewording a message can
+// no longer flip a permanent failure into a retry loop (or the reverse).
+bool isTransient(const std::exception& e) {
+    return DownloadError::isTransient(e);
 }
 
 // Sleep for `ms` in 50 ms slices so a cancel/stop still returns quickly.
@@ -238,7 +233,7 @@ std::int64_t streamRange(Session& session, const UrlParts& parts,
                          std::int64_t to, RateLimiter* limiter) {
     if (HttpClient::g_testFakeFailures.load(std::memory_order_relaxed) > 0 &&
         HttpClient::g_testFakeFailures.fetch_sub(1) > 0)
-        throw std::runtime_error("simulated transient error");
+        throw DownloadError(DownloadError::Category::Transient, "simulated transient error");
 
     HINTERNET hRequest = session.openRequest(parts, L"GET");
     std::wstring range = L"Range: bytes=" + std::to_wstring(from) + L"-" +
@@ -255,9 +250,11 @@ std::int64_t streamRange(Session& session, const UrlParts& parts,
     DWORD status = queryStatus(hRequest);
     if (status != 206) {
         if (status == 200)
-            throw std::runtime_error("Server ignored Range request");
-        throw std::runtime_error("GET request returned HTTP " +
-                                 std::to_string(status));
+            throw DownloadError(DownloadError::Category::Http,
+                                "Server ignored Range request");
+        throw DownloadError(DownloadError::Category::Http,
+                            "GET request returned HTTP " +
+                                std::to_string(status));
     }
 
     // A bare 206 tells us "some range", not "the range we asked for". A broken
@@ -266,41 +263,46 @@ std::int64_t streamRange(Session& session, const UrlParts& parts,
     // header actually matches the requested [from, to] before writing anything.
     std::int64_t crStart = -1, crEnd = -1, crTotal = -1;
     if (!queryContentRange(hRequest, crStart, crEnd, crTotal))
-        throw std::runtime_error("Server returned a malformed Content-Range");
+        throw DownloadError(DownloadError::Category::Http,
+                            "Server returned a malformed Content-Range");
     if (crStart != from || crEnd != to)
-        throw std::runtime_error("Server returned the wrong byte range");
+        throw DownloadError(DownloadError::Category::Http,
+                            "Server returned the wrong byte range");
 
     std::ofstream out(outputPath, std::ios::binary | std::ios::in | std::ios::out);
     if (!out.is_open())
-        throw std::runtime_error("Cannot open output file: " + outputPath);
+        throw DownloadError(DownloadError::Category::Local,
+                            "Cannot open output file: " + outputPath);
     out.seekp(static_cast<std::streamoff>(from));
     if (!out)
-        throw std::runtime_error("Cannot seek output file: " + outputPath);
+        throw DownloadError(DownloadError::Category::Local,
+                            "Cannot seek output file: " + outputPath);
 
     std::vector<char> chunk(64 * 1024);
     std::int64_t written = 0;
     DWORD available = 0;
     while (WinHttpQueryDataAvailable(hRequest, &available) && available > 0) {
         if (stopFlag && stopFlag->load())
-            throw std::runtime_error("cancelled");
+            throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
         DWORD toRead = available > chunk.size() ? static_cast<DWORD>(chunk.size())
-                                                : available;
+                                                 : available;
         DWORD got = 0;
         if (!WinHttpReadData(hRequest, chunk.data(), toRead, &got) || got == 0)
             break;
         if (limiter && !limiter->consume(got, stopFlag))
-            throw std::runtime_error("cancelled");
+            throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
         out.write(chunk.data(), got);
         if (!out)
-            throw std::runtime_error("Disk write failed");
+            throw DownloadError(DownloadError::Category::Local,
+                                "Disk write failed");
         written += got;
     }
     out.close();
 
     if (stopFlag && stopFlag->load())
-        throw std::runtime_error("cancelled");
+        throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
     if (written != to - from + 1)
-        throw std::runtime_error("short read"); // transient: caller retries
+        throw DownloadError(DownloadError::Category::Transient, "short read");
     return written;
 }
 
@@ -418,7 +420,7 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
     // transient error so --self-test-retry can watch recovery.
     if (g_testFakeFailures.load(std::memory_order_relaxed) > 0 &&
         g_testFakeFailures.fetch_sub(1) > 0)
-        throw std::runtime_error("simulated transient error");
+        throw DownloadError(DownloadError::Category::Transient, "simulated transient error");
     UrlParts parts = crackUrl(url);
     Session session(parts);
     HINTERNET hRequest = session.openRequest(parts, L"GET");
@@ -441,9 +443,11 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
 
     DWORD status = queryStatus(hRequest);
     if (status != 200 && status != 206)
-        throw std::runtime_error("GET request returned HTTP " + std::to_string(status));
+        throw DownloadError(DownloadError::Category::Http,
+                            "GET request returned HTTP " + std::to_string(status));
     if (rangeStart >= 0 && status == 200)
-        throw std::runtime_error("Server ignored Range request");
+        throw DownloadError(DownloadError::Category::Http,
+                            "Server ignored Range request");
 
     std::int64_t total = queryContentLength(hRequest);
 
@@ -458,26 +462,29 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
             out.seekp(static_cast<std::streamoff>(writeOffset));
     }
     if (!out.is_open())
-        throw std::runtime_error("Cannot open output file: " + outputPath);
+        throw DownloadError(DownloadError::Category::Local,
+                            "Cannot open output file: " + outputPath);
     if (!out)
-        throw std::runtime_error("Cannot seek output file: " + outputPath);
+        throw DownloadError(DownloadError::Category::Local,
+                            "Cannot seek output file: " + outputPath);
 
     std::vector<char> chunk(64 * 1024);
     std::int64_t received = 0;
     DWORD available = 0;
     while (WinHttpQueryDataAvailable(hRequest, &available) && available > 0) {
         if (stopFlag && stopFlag->load())
-            throw std::runtime_error("cancelled");
+            throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
         DWORD toRead = available > chunk.size() ? static_cast<DWORD>(chunk.size())
-                                                : available;
+                                                 : available;
         DWORD got = 0;
         if (!WinHttpReadData(hRequest, chunk.data(), toRead, &got) || got == 0)
             break;
         if (limiter && !limiter->consume(got, stopFlag))
-            throw std::runtime_error("cancelled");
+            throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
         out.write(chunk.data(), got);
         if (!out)
-            throw std::runtime_error("Disk write failed");
+            throw DownloadError(DownloadError::Category::Local,
+                                "Disk write failed");
         received += got;
         if (progress)
             progress(writeOffset + received, total < 0 ? -1 : writeOffset + total);
@@ -485,7 +492,7 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
     out.close();
 
     if (stopFlag && stopFlag->load())
-        throw std::runtime_error("cancelled");
+        throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
 }
 
 void HttpClient::segmentedCore(const std::string& url,
@@ -571,17 +578,21 @@ void HttpClient::segmentedCore(const std::string& url,
         // Preallocate so every chunk can write at its own offset safely.
         std::ofstream pre(outputPath, std::ios::binary | std::ios::trunc);
         if (!pre.is_open())
-            throw std::runtime_error("Cannot open output file: " + outputPath);
+            throw DownloadError(DownloadError::Category::Local,
+                            "Cannot open output file: " + outputPath);
         pre.seekp(static_cast<std::streamoff>(total - 1));
         if (!pre)
-            throw std::runtime_error("Failed to preallocate output file (seek)");
+            throw DownloadError(DownloadError::Category::Local,
+                                "Failed to preallocate output file (seek)");
         pre.put('\0');
         pre.flush();
         if (!pre)
-            throw std::runtime_error("Failed to preallocate output file (write)");
+            throw DownloadError(DownloadError::Category::Local,
+                                "Failed to preallocate output file (write)");
         pre.close();
         if (fileSizeOnDisk(outputPath) != total)
-            throw std::runtime_error("Failed to preallocate output file (size)");
+            throw DownloadError(DownloadError::Category::Local,
+                                "Failed to preallocate output file (size)");
     }
 
     std::atomic<std::int64_t> next{0};    // next unclaimed byte offset
@@ -647,7 +658,7 @@ void HttpClient::segmentedCore(const std::string& url,
             Session session(parts); // one persistent connection per worker
             for (;;) {
                 if (stopFlag && stopFlag->load())
-                    throw std::runtime_error("cancelled");
+                    throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
                 std::int64_t pos = next.fetch_add(chunkBytes);
                 if (pos >= total)
                     break;
@@ -670,12 +681,12 @@ void HttpClient::segmentedCore(const std::string& url,
                         if (stopped)
                             throw; // user cancel: propagate immediately
                         if (attempt >= kChunkAttempts ||
-                            !isTransient(e.what()))
+                            !isTransient(e))
                             throw;
                         sleepInterruptible(
                             kChunkBaseDelayMs * (1 << (attempt - 1)), stopFlag);
                         if (stopFlag && stopFlag->load())
-                            throw std::runtime_error("cancelled");
+                            throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
                         ++attempt;
                     }
                 }
@@ -701,7 +712,7 @@ void HttpClient::segmentedCore(const std::string& url,
     if (firstError)
         std::rethrow_exception(firstError);
     if (stopFlag && stopFlag->load())
-        throw std::runtime_error("cancelled");
+        throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
     ResumeStore::remove(statePath); // completed: no resume data needed
     if (progress)
         progress(total, total);
@@ -728,11 +739,11 @@ void HttpClient::downloadSegmented(const std::string& url,
             return;
         } catch (const std::exception& e) {
             if (attempt >= maxAttempts ||
-                (stopFlag && stopFlag->load()) || !isTransient(e.what()))
+                (stopFlag && stopFlag->load()) || !isTransient(e))
                 throw;
             sleepInterruptible(baseRetryMs * (1 << (attempt - 1)), stopFlag);
             if (stopFlag && stopFlag->load())
-                throw std::runtime_error("cancelled");
+                throw DownloadError(DownloadError::Category::Cancelled, "cancelled");
         }
     }
 }
