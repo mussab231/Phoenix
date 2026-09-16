@@ -11,6 +11,7 @@
 #include <chrono>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -43,7 +44,7 @@ std::string toUtf8(const std::wstring& w) {
 }
 
 [[noreturn]] void fail(const std::string& what,
-                       DownloadError::Category cat = DownloadError::Category::Local) {
+                       DownloadError::Category cat = DownloadError::Category::Transient) {
     throw DownloadError(cat, what + " (Win32 error " +
                               std::to_string(GetLastError()) + ")");
 }
@@ -73,6 +74,35 @@ UrlParts crackUrl(const std::string& url) {
     return p;
 }
 
+DWORD queryStatus(HINTERNET hRequest) {
+    DWORD status = 0;
+    DWORD size = sizeof(status);
+    if (!WinHttpQueryHeaders(hRequest,
+                             WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &size,
+                             WINHTTP_NO_HEADER_INDEX))
+        fail("Status query failed");
+    return status;
+}
+
+// Read the redirect target of a 3xx response. Empty when absent.
+std::wstring queryLocation(HINTERNET hRequest) {
+    DWORD len = 0;
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION,
+                        WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER,
+                        &len, WINHTTP_NO_HEADER_INDEX);
+    if (len == 0)
+        return {};
+    std::wstring out(static_cast<size_t>(len) / sizeof(wchar_t), L'\0');
+    if (!WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION,
+                             WINHTTP_HEADER_NAME_BY_INDEX, out.data(), &len,
+                             WINHTTP_NO_HEADER_INDEX))
+        return {};
+    if (!out.empty() && out.back() == L'\0')
+        out.pop_back();
+    return out;
+}
+
 // RAII holder for session + connection + request handles.
 class Session {
 public:
@@ -82,9 +112,17 @@ public:
                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession_)
             fail("WinHttpOpen");
-        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        // Never silently follow an https link down to plain http: the URL,
+        // path and any embedded credentials would then cross the network in
+        // the clear.
+        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
         WinHttpSetOption(hSession_, WINHTTP_OPTION_REDIRECT_POLICY, &policy,
                          sizeof(policy));
+        // Reject legacy protocols: TLS 1.2/1.3 only, no SSLv3/TLS 1.0 downgrade.
+        DWORD protos = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 |
+                       WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+        WinHttpSetOption(hSession_, WINHTTP_OPTION_SECURE_PROTOCOLS, &protos,
+                         sizeof(protos));
         // Allow parallel segment connections against the same host.
         DWORD maxConns = 16;
         WinHttpSetOption(hSession_, WINHTTP_OPTION_MAX_CONNS_PER_SERVER, &maxConns,
@@ -123,22 +161,63 @@ public:
         return hRequest_;
     }
 
+    // Sends `method` to `parts` and, if the server redirects, follows the
+    // Location chain manually (automatic redirects are disabled at the session
+    // level so we can vet every hop). A redirect from https to plain http is
+    // refused: it would leak the URL, path, and any credentials in the clear.
+    // `setupHeaders` (re)applies custom headers on every hop so Range and other
+    // request options survive the redirect. Returns the final request handle,
+    // already sent and with its response received.
+    using HeaderSetup = std::function<void(HINTERNET)>;
+    HINTERNET secureRequest(UrlParts parts, const wchar_t* method,
+                            const HeaderSetup& setupHeaders = {}) {
+        constexpr int kMaxRedirects = 8;
+        for (int hop = 0; hop < kMaxRedirects; ++hop) {
+            HINTERNET hRequest = openRequest(parts, method);
+            if (setupHeaders)
+                setupHeaders(hRequest);
+            if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                    WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+                fail("send failed");
+            if (!WinHttpReceiveResponse(hRequest, nullptr))
+                fail("response failed");
+
+            const DWORD status = queryStatus(hRequest);
+            if (status < 300 || status >= 400)
+                return hRequest; // final answer; the caller inspects it
+
+            const std::wstring location = queryLocation(hRequest);
+            if (location.empty())
+                return hRequest; // 3xx with no Location: let the caller report it
+
+            UrlParts next = crackUrl(toUtf8(location));
+            if (parts.secure && !next.secure)
+                throw DownloadError(DownloadError::Category::Http,
+                                    "Refused HTTPS->HTTP downgrade at " +
+                                        toUtf8(location));
+            // Reconnect if the redirect crosses hosts: the existing
+            // connection handle is bound to the original host/port.
+            if (next.host != parts.host || next.port != parts.port) {
+                if (hConnect_) {
+                    WinHttpCloseHandle(hConnect_);
+                    hConnect_ = nullptr;
+                }
+                hConnect_ = WinHttpConnect(hSession_, next.host.c_str(),
+                                           next.port, 0);
+                if (!hConnect_)
+                    fail("WinHttpConnect (redirect)");
+            }
+            parts = next;
+        }
+        throw DownloadError(DownloadError::Category::Http,
+                            "Too many redirects");
+    }
+
 private:
     HINTERNET hSession_ = nullptr;
     HINTERNET hConnect_ = nullptr;
     HINTERNET hRequest_ = nullptr;
 };
-
-DWORD queryStatus(HINTERNET hRequest) {
-    DWORD status = 0;
-    DWORD size = sizeof(status);
-    if (!WinHttpQueryHeaders(hRequest,
-                             WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &size,
-                             WINHTTP_NO_HEADER_INDEX))
-        fail("Status query failed");
-    return status;
-}
 
 // Parse "bytes X-Y/TOTAL" from a 206 response into [rangeStart, rangeEnd]
 // and the full resource size. Returns false if the header is missing or
@@ -235,17 +314,15 @@ std::int64_t streamRange(Session& session, const UrlParts& parts,
         HttpClient::g_testFakeFailures.fetch_sub(1) > 0)
         throw DownloadError(DownloadError::Category::Transient, "simulated transient error");
 
-    HINTERNET hRequest = session.openRequest(parts, L"GET");
-    std::wstring range = L"Range: bytes=" + std::to_wstring(from) + L"-" +
-                         std::to_wstring(to);
-    if (!WinHttpAddRequestHeaders(hRequest, range.c_str(), static_cast<DWORD>(-1),
-                                  WINHTTP_ADDREQ_FLAG_ADD))
-        fail("Range header failed");
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        fail("GET send failed");
-    if (!WinHttpReceiveResponse(hRequest, nullptr))
-        fail("GET response failed");
+    HINTERNET hRequest = session.secureRequest(
+        parts, L"GET", [from, to](HINTERNET h) {
+            std::wstring range = L"Range: bytes=" + std::to_wstring(from) + L"-" +
+                                 std::to_wstring(to);
+            if (!WinHttpAddRequestHeaders(h, range.c_str(),
+                                          static_cast<DWORD>(-1),
+                                          WINHTTP_ADDREQ_FLAG_ADD))
+                fail("Range header failed");
+        });
 
     DWORD status = queryStatus(hRequest);
     if (status != 206) {
@@ -319,35 +396,28 @@ std::int64_t HttpClient::getFileSize(const std::string& url) {
     // necessarily also answers this probe.
     try {
         Session session(parts);
-        HINTERNET hRequestHttp = session.openRequest(parts, L"HEAD");
-        if (WinHttpSendRequest(hRequestHttp, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                               WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-            WinHttpReceiveResponse(hRequestHttp, nullptr)) {
-            const DWORD status = queryStatus(hRequestHttp);
-            const std::int64_t len = (status == 200)
-                                         ? queryContentLength(hRequestHttp)
-                                         : -1;
-            if (len >= 0) {
-                // HEAD worked and gave us a real size — use it and bail earlyso
-                // the segmented path never pays for an extra round-trip.
-                return len;
-            }
+        HINTERNET hRequestHttp = session.secureRequest(parts, L"HEAD");
+        const DWORD status = queryStatus(hRequestHttp);
+        const std::int64_t len = (status == 200)
+                                     ? queryContentLength(hRequestHttp)
+                                     : -1;
+        if (len >= 0) {
+            // HEAD worked and gave us a real size — use it and bail early so
+            // the segmented path never pays for an extra round-trip.
+            return len;
         }
     } catch (...) {
         // fall through to the GET-byte probe below
     }
 
     Session probe(parts);
-    HINTERNET hRequest = probe.openRequest(parts, L"GET");
-    const wchar_t* range = L"Range: bytes=0-0";
-    if (!WinHttpAddRequestHeaders(hRequest, range, static_cast<DWORD>(-1),
-                                  WINHTTP_ADDREQ_FLAG_ADD))
-        fail("Range probe header failed");
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        fail("Range probe send failed");
-    if (!WinHttpReceiveResponse(hRequest, nullptr))
-        fail("Range probe response failed");
+    HINTERNET hRequest = probe.secureRequest(
+        parts, L"GET", [](HINTERNET h) {
+            const wchar_t* range = L"Range: bytes=0-0";
+            if (!WinHttpAddRequestHeaders(h, range, static_cast<DWORD>(-1),
+                                          WINHTTP_ADDREQ_FLAG_ADD))
+                fail("Range probe header failed");
+        });
 
     const DWORD status = queryStatus(hRequest);
     if (status != 206)
@@ -366,12 +436,12 @@ void HttpClient::getResourceIdentity(const std::string& url,
     lastModified.clear();
     UrlParts parts = crackUrl(url);
     Session session(parts);
-    HINTERNET hRequest = session.openRequest(parts, L"HEAD");
-
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-        !WinHttpReceiveResponse(hRequest, nullptr))
+    HINTERNET hRequest;
+    try {
+        hRequest = session.secureRequest(parts, L"HEAD");
+    } catch (...) {
         return; // identity unknown, not fatal: fall back to URL+total check
+    }
 
     // WinHTTP gives headers as wide strings; convert both back to UTF-8.
     auto readHeader = [&](DWORD which) -> std::string {
@@ -396,17 +466,13 @@ void HttpClient::getResourceIdentity(const std::string& url,
 bool HttpClient::supportsRanges(const std::string& url) {
     UrlParts parts = crackUrl(url);
     Session session(parts);
-    HINTERNET hRequest = session.openRequest(parts, L"GET");
-
-    const wchar_t* probe = L"Range: bytes=0-0";
-    if (!WinHttpAddRequestHeaders(hRequest, probe, static_cast<DWORD>(-1),
-                                  WINHTTP_ADDREQ_FLAG_ADD))
-        fail("Range probe failed");
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        fail("Range probe send failed");
-    if (!WinHttpReceiveResponse(hRequest, nullptr))
-        fail("Range probe response failed");
+    HINTERNET hRequest = session.secureRequest(
+        parts, L"GET", [](HINTERNET h) {
+            const wchar_t* probe = L"Range: bytes=0-0";
+            if (!WinHttpAddRequestHeaders(h, probe, static_cast<DWORD>(-1),
+                                          WINHTTP_ADDREQ_FLAG_ADD))
+                fail("Range probe failed");
+        });
 
     return queryStatus(hRequest) == 206;
 }
@@ -423,23 +489,18 @@ void HttpClient::download(const std::string& url, const std::string& outputPath,
         throw DownloadError(DownloadError::Category::Transient, "simulated transient error");
     UrlParts parts = crackUrl(url);
     Session session(parts);
-    HINTERNET hRequest = session.openRequest(parts, L"GET");
-
-    if (rangeStart >= 0) {
-        std::wstring range = L"Range: bytes=" + std::to_wstring(rangeStart) + L"-";
-        if (rangeEnd >= rangeStart)
-            range += std::to_wstring(rangeEnd);
-        if (!WinHttpAddRequestHeaders(hRequest, range.c_str(),
-                                      static_cast<DWORD>(-1),
-                                      WINHTTP_ADDREQ_FLAG_ADD))
-            fail("Range header failed");
-    }
-
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        fail("GET send failed");
-    if (!WinHttpReceiveResponse(hRequest, nullptr))
-        fail("GET response failed");
+    HINTERNET hRequest = session.secureRequest(
+        parts, L"GET", [rangeStart, rangeEnd](HINTERNET h) {
+            if (rangeStart < 0)
+                return;
+            std::wstring range = L"Range: bytes=" + std::to_wstring(rangeStart) + L"-";
+            if (rangeEnd >= rangeStart)
+                range += std::to_wstring(rangeEnd);
+            if (!WinHttpAddRequestHeaders(h, range.c_str(),
+                                          static_cast<DWORD>(-1),
+                                          WINHTTP_ADDREQ_FLAG_ADD))
+                fail("Range header failed");
+        });
 
     DWORD status = queryStatus(hRequest);
     if (status != 200 && status != 206)
