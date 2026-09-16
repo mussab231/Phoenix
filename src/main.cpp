@@ -45,6 +45,10 @@
 #include <string>
 #include <vector>
 
+#ifndef PHOENIX_VERSION
+#define PHOENIX_VERSION "0.9.0-dev"
+#endif
+
 namespace {
 
 // Dark Fusion theme + Phoenix style sheet. GUI only.
@@ -78,6 +82,10 @@ void applyTheme(QApplication& app) {
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        if (arg == "--version" || arg == "-v") {
+            std::printf("Phoenix %s\n", PHOENIX_VERSION);
+            return 0;
+        }
         if (arg == "--self-test")
             return SelfTest::runSelfTest();
         if (arg == "--self-test-mt")

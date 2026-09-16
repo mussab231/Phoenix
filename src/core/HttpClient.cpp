@@ -123,6 +123,11 @@ public:
                        WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
         WinHttpSetOption(hSession_, WINHTTP_OPTION_SECURE_PROTOCOLS, &protos,
                          sizeof(protos));
+        // Negotiate HTTP/2 when the server offers it (Windows 10 1607+; older
+        // builds and plain-HTTP servers fall back to HTTP/1.1 transparently).
+        DWORD httpProto = WINHTTP_PROTOCOL_FLAG_HTTP2;
+        WinHttpSetOption(hSession_, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+                         &httpProto, sizeof(httpProto));
         // Allow parallel segment connections against the same host.
         DWORD maxConns = 16;
         WinHttpSetOption(hSession_, WINHTTP_OPTION_MAX_CONNS_PER_SERVER, &maxConns,

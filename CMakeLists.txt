@@ -81,4 +81,5 @@ else()
 endif()
 
 target_include_directories(Phoenix PRIVATE src)
+target_compile_definitions(Phoenix PRIVATE PHOENIX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(Phoenix PRIVATE Qt6::Widgets Qt6::Network winhttp powrprof ws2_32)

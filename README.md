@@ -36,6 +36,7 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
 | **Native Messaging Host + browser extension** (`tools/native/`): right-click any link -> "Send link to Phoenix"; hands off to the running window or queues itself | ✅ |
 | **Arabic UI + RTL**: complete Arabic interface with right-to-left layout; language switch applies live (no restart), persists across runs | ✅ |
+| **HTTP/2**: negotiated automatically on Windows 10+ (transparent HTTP/1.1 fallback) | ✅ |
 | **Start with Windows** & **Start minimized to tray** options (Settings → boot into the tray, `HKCU\...\Run` autostart) | ✅ |
 | **Add dialog pre-fill**: a copied download URL is detected and both URL + target name are filled in automatically | ✅ |
 | **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
@@ -64,6 +65,7 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 ## ▶️ Run
 
 ```powershell
+.\build\Phoenix.exe --version       # print version and exit
 .\build\Phoenix.exe                    # GUI (queue table + scheduler + power actions)
 .\build\Phoenix.exe --self-test        # quick HEAD + GET smoke test
 .\build\Phoenix.exe --self-test-mt     # 10 MB over 8 connections + content check
@@ -168,11 +170,8 @@ The generator prefers it automatically; `assets/phoenix.svg` is only a fallback.
 
 ## 📄 License
 
-Proprietary — **all rights reserved** (no license file, no grant of use).
-You may browse, fork-for-review and run the app yourself, but you may **not**
-redistribute, sell, or reuse this code (in whole or in part, including in
-derivative or closed-source projects) without written permission from the
-author.
+Released under the **MIT License** — see [LICENSE](LICENSE).
 
-Before contributing, read the license note above: by opening a pull request
-you agree that your contribution is offered under the same terms.
+You are free to use, copy, modify, merge, publish, distribute, sublicense and
+sell copies of Phoenix. Contributions are welcome: by opening a pull request
+you agree your contribution is offered under the same MIT terms.
