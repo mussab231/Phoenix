@@ -1,6 +1,6 @@
 #include "core/Uuid.h"
 
-#include <QUuid>
+#include <QtCore/QUuid>
 
 std::string Uuid::create() {
     // QUuid::createUuid is documented thread-safe and uses a CSPRNG on all

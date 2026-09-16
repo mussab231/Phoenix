@@ -1,6 +1,7 @@
 #include "core/DownloadQueue.h"
 
 #include "core/DownloadEngine.h"
+#include "core/Uuid.h"
 
 #include <QDateTime>
 #include <QTimer>
@@ -17,6 +18,7 @@ int DownloadQueue::addDownload(const std::string& url, const std::string& output
                                double maxSpeedBps, bool startPaused) {
     DownloadItem item;
     item.id = m_nextId++;
+    item.uuid = Uuid::create();
     item.url = url;
     item.outputPath = outputPath;
     item.segments = segments < 1 ? 1 : (segments > 16 ? 16 : segments);
