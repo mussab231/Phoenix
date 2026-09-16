@@ -18,6 +18,7 @@ int runProtoTest();
 int runUrlMatchTest();
 int runSettingsTest();
 int runNativeHostTest();
+int runChecksumTest();
 } // namespace SelfTest
 
 // Runs the browser native-messaging host loop (stdin/stdout JSON frames).

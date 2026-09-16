@@ -101,6 +101,16 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
             &QWidget::setEnabled);
     form->addRow(m_scheduleCheck, m_scheduleEdit);
 
+    // Optional integrity check: paste the publisher's SHA-256 and the finished
+    // file is verified automatically. Blank (default) skips verification.
+    m_hashEdit = new QLineEdit(this);
+    m_hashEdit->setPlaceholderText(
+        QStringLiteral("a1b2c3...  (64 hex chars, optional)"));
+    m_hashEdit->setToolTip(I18n::t(
+        "SHA-256 checksum to verify against once the download finishes. "
+        "Optional: leave blank to skip verification."));
+    form->addRow(I18n::t("SHA-256:"), m_hashEdit);
+
     layout->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
@@ -154,6 +164,20 @@ bool AddDialog::isScheduled() const {
 
 qint64 AddDialog::scheduledAt() const {
     return m_scheduleEdit->dateTime().toMSecsSinceEpoch();
+}
+
+QString AddDialog::expectedSha256() const {
+    // Tolerate pasted hashes with spaces/colons ("ab cd ef" or checksum-file
+    // style); only hex digits are kept.
+    QString out;
+    for (const QChar ch : m_hashEdit->text().trimmed()) {
+        const ushort c = ch.unicode();
+        const bool hex =
+            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (hex)
+            out.append(ch);
+    }
+    return out.length() == 64 ? out.toLower() : QString();
 }
 
 void AddDialog::onBrowse() {

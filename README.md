@@ -39,6 +39,8 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **HTTP/2**: negotiated automatically on Windows 10+ (transparent HTTP/1.1 fallback) | ✅ |
 | **Start with Windows** & **Start minimized to tray** options (Settings → boot into the tray, `HKCU\...\Run` autostart) | ✅ |
 | **Add dialog pre-fill**: a copied download URL is detected and both URL + target name are filled in automatically | ✅ |
+| **SHA-256 verification**: optional hash field in Add dialog; the finished file is checked automatically ("Checksum OK" / "Checksum FAILED" in the row) | ✅ |
+| **Retry failed downloads**: a failed item can be re-queued with one click (toolbar Retry) | ✅ |
 | **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
 | Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-0.9.0-portable.zip`) + Inno Setup script | ✅ |
 | Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`) | ✅ |
@@ -80,6 +82,7 @@ Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preco
 .\build\Phoenix.exe --self-test-urlmatch # URL classification for clipboard catching
 .build\Phoenix.exe --self-test-settings # saved-preferences round trip (defaults, clamp, persist)
 .\build\Phoenix.exe --self-test-native  # native-messaging frames on a real pipe + JSON dispatcher
+.\build\Phoenix.exe --self-test-checksum # correct SHA-256 accepted, wrong hash detected
 .\build\Phoenix.exe --register         # register phoenix:// handler in HKCU (also done on first GUI launch)
 .\build\Phoenix.exe --unregister       # remove the protocol registration
 ```

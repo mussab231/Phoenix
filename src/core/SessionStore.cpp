@@ -89,7 +89,8 @@ bool SessionStore::save(const std::string& path,
             << it->segments << '\n'
             << it->scheduledAt << '\n'
             << static_cast<long long>(it->maxSpeedBps) << '\n'
-            << (willAutoResume(it->state) ? 1 : 0) << '\n';
+            << (willAutoResume(it->state) ? 1 : 0) << '\n'
+            << it->expectedSha256 << '\n';
     }
     out.close();
     return static_cast<bool>(out);
@@ -126,6 +127,11 @@ std::vector<DownloadItem> SessionStore::load(const std::string& path) {
             return result;
         if (!std::getline(in, line) || !parseInt64(line, resume))
             return result;
+        // Optional tail written by v0.9.1+: the expected SHA-256. Absent on
+        // older session files, which simply skip verification.
+        std::string hash;
+        if (std::getline(in, hash))
+            it.expectedSha256 = hash;
 
         it.segments = seg < 1 ? 1 : (seg > 16 ? 16 : static_cast<int>(seg));
         it.scheduledAt = sched > 0 ? sched : 0;

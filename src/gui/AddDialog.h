@@ -24,6 +24,8 @@ public:
     double maxSpeedBps() const;
     bool isScheduled() const;
     qint64 scheduledAt() const;
+    // Hex SHA-256 the finished file must match; empty when left blank.
+    QString expectedSha256() const;
 
 private slots:
     void onBrowse();
@@ -31,6 +33,7 @@ private slots:
 private:
     QLineEdit* m_urlEdit = nullptr;
     QLineEdit* m_pathEdit = nullptr;
+    QLineEdit* m_hashEdit = nullptr;
     QSpinBox* m_segmentsBox = nullptr;
     QSpinBox* m_speedBox = nullptr;
     QCheckBox* m_scheduleCheck = nullptr;

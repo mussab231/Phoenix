@@ -26,14 +26,19 @@ public:
 
     // startAtMs = epoch milliseconds; 0 (default) starts right away.
     // maxSpeedBps = per-download speed cap; 0 = unlimited.
+    // expectedSha256 = optional hex SHA-256 verified once the file is done
+    // (empty skips verification).
     // startPaused = true restores an item in the Paused state instead of
     // letting the queue start it (used when reloading a saved session).
     int addDownload(const std::string& url, const std::string& outputPath,
                     int segments = 8, std::int64_t startAtMs = 0,
-                    double maxSpeedBps = 0.0, bool startPaused = false);
+                    double maxSpeedBps = 0.0, bool startPaused = false,
+                    const std::string& expectedSha256 = std::string());
     void pauseDownload(int id);
     void resumeDownload(int id);
     void removeDownload(int id);
+    // Retry a Failed item: clears the error and re-queues it.
+    void retryDownload(int id);
     void setMaxConcurrent(int n);
     int maxConcurrent() const { return m_maxConcurrent; }
     void setAutoAction(int action); // PowerControl::Action

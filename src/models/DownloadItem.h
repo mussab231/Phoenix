@@ -23,4 +23,6 @@ struct DownloadItem {
     double speedBps = 0.0;
     std::string statusText = "Queued";
     std::string errorMessage;
+    // Optional SHA-256 (hex) the finished file must match; empty = unchecked.
+    std::string expectedSha256;
 };

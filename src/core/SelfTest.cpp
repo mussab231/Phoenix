@@ -621,6 +621,92 @@ int SelfTest::runRetryTest() {
     return 0;
 }
 
+// Checksum verification: downloads a known file with the queue, verifies the
+// real SHA-256, then feeds a deliberately wrong hash and asserts the mismatch
+// is reported (a corrupt download must never look like a good one).
+int SelfTest::runChecksumTest() {
+    const std::string url = "https://proof.ovh.net/files/1Mb.dat";
+    const std::string out = tempFile("phoenix_checksum.bin");
+    std::remove(out.c_str());
+    std::remove((out + ".phoenix-state").c_str());
+
+    int argc = 1;
+    char prog[] = "phoenix";
+    char* argv[] = {prog};
+    QCoreApplication app(argc, argv);
+
+    DownloadQueue queue;
+    queue.setMaxConcurrent(1);
+
+    // Part 1: correct hash -> "Checksum OK".
+    const std::string realHash = "66f77f71710117f71712eb5766f3151e8aecec390ebe0b0349c84961f1a547e6";
+    const int idGood = queue.addDownload(url, out, 4, 0, 0.0, false, realHash);
+    (void)idGood;
+
+    bool goodOk = false;
+    QObject::connect(&queue, &DownloadQueue::itemChanged, &app,
+                     [&](int id) {
+                         for (const auto& it : queue.items()) {
+                             if (it.id != id)
+                                 continue;
+                             if (it.state == DownloadState::Completed &&
+                                 it.statusText == "Checksum OK") {
+                                 goodOk = true;
+                                 QCoreApplication::quit();
+                             } else if (it.state == DownloadState::Failed ||
+                                        (it.state == DownloadState::Completed &&
+                                         it.statusText.rfind("Checksum", 0) == 0 &&
+                                         it.statusText != "Checksum OK")) {
+                                 QCoreApplication::quit();
+                             }
+                         }
+                     });
+    QTimer::singleShot(120000, &app, &QCoreApplication::quit);
+    app.exec();
+
+    if (!goodOk) {
+        std::printf("CHECKSUM-TEST FAILED (part 1: correct hash not accepted)\n");
+        return 1;
+    }
+    std::printf("Part 1: correct hash verified OK\n");
+
+    // Part 2: wrong hash -> mismatch detected and flagged.
+    std::remove(out.c_str());
+    std::remove((out + ".phoenix-state").c_str());
+    DownloadQueue queue2;
+    queue2.setMaxConcurrent(1);
+    const std::string wrongHash = std::string(64, '0');
+    const int idBad = queue2.addDownload(url, out, 4, 0, 0.0, false, wrongHash);
+    (void)idBad;
+
+    bool mismatchDetected = false;
+    QObject::connect(&queue2, &DownloadQueue::itemChanged, &app,
+                     [&](int id) {
+                         for (const auto& it : queue2.items()) {
+                             if (it.id != id)
+                                 continue;
+                             if (it.state == DownloadState::Completed &&
+                                 it.statusText == "Checksum FAILED") {
+                                 mismatchDetected = true;
+                                 QCoreApplication::quit();
+                             } else if (it.state == DownloadState::Failed) {
+                                 QCoreApplication::quit();
+                             }
+                         }
+                     });
+    QTimer::singleShot(120000, &app, &QCoreApplication::quit);
+    app.exec();
+
+    if (!mismatchDetected) {
+        std::printf("CHECKSUM-TEST FAILED (part 2: bad hash not detected)\n");
+        return 1;
+    }
+    std::printf("Part 2: wrong hash detected -> %s\n",
+                queue2.items().front().statusText.c_str());
+    std::printf("CHECKSUM-TEST OK -> %s\n", out.c_str());
+    return 0;
+}
+
 // Localhost HTTP listener test: hit /add with an encoded URL, expect the
 // urlReceived signal to fire with the decoded value, and /status to answer.
 int SelfTest::runListenTest() {

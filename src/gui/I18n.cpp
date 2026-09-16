@@ -45,6 +45,7 @@ const QHash<QString, QString>& strings() {
         {QStringLiteral("Pause"), QStringLiteral("إيقاف مؤقت")},
         {QStringLiteral("Resume"), QStringLiteral("استكمال")},
         {QStringLiteral("Remove"), QStringLiteral("حذف")},
+        {QStringLiteral("Retry"), QStringLiteral("إعادة المحاولة")},
         {QStringLiteral("Settings"), QStringLiteral("الإعدادات")},
         {QStringLiteral("Clear completed"),
          QStringLiteral("مسح المكتملة")},
@@ -54,6 +55,8 @@ const QHash<QString, QString>& strings() {
          QStringLiteral("استكمال التحميل المحدد")},
         {QStringLiteral("Remove the selected download from the queue"),
          QStringLiteral("حذف التحميل المحدد من القائمة")},
+        {QStringLiteral("Retry the selected failed download"),
+         QStringLiteral("إعادة محاولة التحميل المحدد الفاشل")},
         {QStringLiteral("Saved preferences: folder, connections, speed, power, clipboard"),
          QStringLiteral("التفضيلات المحفوظة: المجلد، الاتصالات، السرعة، الطاقة، الحافظة")},
         {QStringLiteral("Max simultaneous:"), QStringLiteral("أقصى عدد متوازٍ:")},
@@ -108,6 +111,14 @@ const QHash<QString, QString>& strings() {
         {QStringLiteral("Maximum download speed. Unlimited by default."),
          QStringLiteral("السرعة القصوى للتحميل. غير محدودة افتراضيًا.")},
         {QStringLiteral("Save as"), QStringLiteral("الحفظ باسم")},
+
+        // --- checksum verification ---
+        {QStringLiteral("SHA-256:"),
+         QStringLiteral("SHA-256:")},
+        {QStringLiteral("SHA-256 checksum to verify against once the download finishes. "
+                        "Optional: leave blank to skip verification."),
+         QStringLiteral("بصمة SHA-256 للتحقق من الملف عند اكتمال التحميل. "
+                        "اختياري: اتركه فارغًا لتخطي التحقق.")},
 
         // --- main status bar (link catcher) ---
         {QStringLiteral("Link catcher ready: http://127.0.0.1:%1/add?token=%2 (and phoenix:// links)"),
@@ -203,6 +214,13 @@ QString I18n::status(const QString& en) {
     if (en.startsWith(QStringLiteral("Failed: ")))
         return QStringLiteral("فشل: ") +
                en.mid(QStringLiteral("Failed: ").length());
+
+    if (en == QStringLiteral("Checksum OK"))
+        return QStringLiteral("التكامل سليم");
+    if (en == QStringLiteral("Checksum FAILED"))
+        return QStringLiteral("التكامل فاسد");
+    if (en == QStringLiteral("Completed (checksum unreadable)"))
+        return QStringLiteral("مكتمل (تعذّر التحقق)");
 
     return en;
 }

@@ -62,16 +62,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_pauseBtn = new QPushButton(I18n::t("Pause"), central);
     m_resumeBtn = new QPushButton(I18n::t("Resume"), central);
     m_removeBtn = new QPushButton(I18n::t("Remove"), central);
+    m_retryBtn = new QPushButton(I18n::t("Retry"), central);
     m_settingsBtn = new QPushButton(I18n::t("Settings"), central);
     m_clearBtn = new QPushButton(I18n::t("Clear completed"), central);
     m_pauseBtn->setToolTip(I18n::t("Pause the selected download (resumable)"));
     m_resumeBtn->setToolTip(I18n::t("Resume the selected download"));
     m_removeBtn->setToolTip(I18n::t("Remove the selected download from the queue"));
+    m_retryBtn->setToolTip(I18n::t("Retry the selected failed download"));
     m_settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
     topRow->addWidget(m_addBtn);
     topRow->addWidget(m_pauseBtn);
     topRow->addWidget(m_resumeBtn);
     topRow->addWidget(m_removeBtn);
+    topRow->addWidget(m_retryBtn);
     topRow->addWidget(m_settingsBtn);
     topRow->addWidget(m_clearBtn);
     topRow->addStretch(1);
@@ -107,6 +110,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_pauseBtn, &QPushButton::clicked, this, &MainWindow::onPause);
     connect(m_resumeBtn, &QPushButton::clicked, this, &MainWindow::onResume);
     connect(m_removeBtn, &QPushButton::clicked, this, &MainWindow::onRemove);
+    connect(m_retryBtn, &QPushButton::clicked, this, &MainWindow::onRetry);
     connect(m_settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
     connect(m_clearBtn, &QPushButton::clicked, this, &MainWindow::clearCompleted);
     connect(m_maxBox, &QSpinBox::valueChanged, m_queue,
@@ -175,11 +179,13 @@ void MainWindow::retranslateUi() {
     m_pauseBtn->setText(I18n::t("Pause"));
     m_resumeBtn->setText(I18n::t("Resume"));
     m_removeBtn->setText(I18n::t("Remove"));
+    m_retryBtn->setText(I18n::t("Retry"));
     m_settingsBtn->setText(I18n::t("Settings"));
     m_clearBtn->setText(I18n::t("Clear completed"));
     m_pauseBtn->setToolTip(I18n::t("Pause the selected download (resumable)"));
     m_resumeBtn->setToolTip(I18n::t("Resume the selected download"));
     m_removeBtn->setToolTip(I18n::t("Remove the selected download from the queue"));
+    m_retryBtn->setToolTip(I18n::t("Retry the selected failed download"));
     m_settingsBtn->setToolTip(I18n::t("Saved preferences: folder, connections, speed, power, clipboard"));
 
     m_maxLbl->setText(I18n::t("Max simultaneous:"));
@@ -359,7 +365,7 @@ void MainWindow::onAdd() {
         return;
     m_queue->addDownload(dlg.url().toStdString(), dlg.outputPath().toStdString(),
                          dlg.segments(), dlg.isScheduled() ? dlg.scheduledAt() : 0,
-                         dlg.maxSpeedBps());
+                         dlg.maxSpeedBps(), false, dlg.expectedSha256().toStdString());
 }
 
 void MainWindow::onSettings() {
@@ -388,6 +394,12 @@ void MainWindow::onRemove() {
     int id = selectedId();
     if (id > 0)
         m_queue->removeDownload(id);
+}
+
+void MainWindow::onRetry() {
+    int id = selectedId();
+    if (id > 0)
+        m_queue->retryDownload(id);
 }
 
 void MainWindow::clearCompleted() {

@@ -1,5 +1,6 @@
 #include "core/DownloadQueue.h"
 
+#include "core/Checksum.h"
 #include "core/DownloadEngine.h"
 #include "core/Uuid.h"
 
@@ -15,7 +16,8 @@ DownloadQueue::DownloadQueue(QObject* parent) : QObject(parent) {
 
 int DownloadQueue::addDownload(const std::string& url, const std::string& outputPath,
                                int segments, std::int64_t startAtMs,
-                               double maxSpeedBps, bool startPaused) {
+                               double maxSpeedBps, bool startPaused,
+                               const std::string& expectedSha256) {
     DownloadItem item;
     item.id = m_nextId++;
     item.uuid = Uuid::create();
@@ -23,6 +25,7 @@ int DownloadQueue::addDownload(const std::string& url, const std::string& output
     item.outputPath = outputPath;
     item.segments = segments < 1 ? 1 : (segments > 16 ? 16 : segments);
     item.maxSpeedBps = maxSpeedBps < 0.0 ? 0.0 : maxSpeedBps;
+    item.expectedSha256 = expectedSha256;
     if (startAtMs > 0)
         item.scheduledAt = startAtMs;
     item.state = startPaused ? DownloadState::Paused : DownloadState::Idle;
@@ -63,6 +66,18 @@ void DownloadQueue::resumeDownload(int id) {
     m_finishNotified = false;
     emit itemChanged(id);
     pump();
+}
+
+void DownloadQueue::retryDownload(int id) {
+    // A Failed download re-enters the queue the same way a paused one resumes:
+    // the resume machinery reuses whatever bytes are still valid on disk and
+    // re-fetches only the rest.
+    DownloadItem* it = find(id);
+    if (!it || it->state != DownloadState::Failed)
+        return;
+    it->state = DownloadState::Paused;
+    it->errorMessage.clear();
+    resumeDownload(id);
 }
 
 void DownloadQueue::removeDownload(int id) {
@@ -160,6 +175,27 @@ void DownloadQueue::onItemFinished(int id, const QString&) {
         it->receivedBytes = it->totalBytes;
     it->statusText = "Completed";
     emit itemChanged(id);
+
+    // When the user supplied an expected hash, verify the finished file now.
+    // A mismatch does not delete anything (the user may want to inspect it),
+    // it just flags the row so a corrupt download is never mistaken for a
+    // good one.
+    if (!it->expectedSha256.empty()) {
+        const std::string got = Checksum::sha256File(it->outputPath);
+        if (got.empty()) {
+            it->statusText = "Completed (checksum unreadable)";
+            emit itemChanged(id);
+        } else if (!Checksum::hexEquals(got, it->expectedSha256)) {
+            it->statusText = "Checksum FAILED";
+            it->errorMessage = "SHA-256 mismatch: expected " + it->expectedSha256 +
+                               ", got " + got;
+            emit itemChanged(id);
+        } else {
+            it->statusText = "Checksum OK";
+            emit itemChanged(id);
+        }
+    }
+
     pump();
 }
 

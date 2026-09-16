@@ -112,6 +112,8 @@ int main(int argc, char** argv) {
             return SelfTest::runSettingsTest();
         if (arg == "--self-test-native")
             return SelfTest::runNativeHostTest();
+        if (arg == "--self-test-checksum")
+            return SelfTest::runChecksumTest();
         if (arg == "--native-messaging")
             return runNativeHost(argc, argv);
         // Chrome/Edge spawn the native host with the calling extension's

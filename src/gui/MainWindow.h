@@ -44,6 +44,7 @@ private slots:
     void onPause();
     void onResume();
     void onRemove();
+    void onRetry();
     void onSettings();
     void onItemAdded(int id);
     void onItemChanged(int id);
@@ -72,6 +73,7 @@ private:
     QPushButton* m_pauseBtn = nullptr;
     QPushButton* m_resumeBtn = nullptr;
     QPushButton* m_removeBtn = nullptr;
+    QPushButton* m_retryBtn = nullptr;
     QPushButton* m_settingsBtn = nullptr;
     QPushButton* m_clearBtn = nullptr;
     QLabel* m_maxLbl = nullptr;
