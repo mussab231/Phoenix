@@ -13,7 +13,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Svg Gui)
 add_executable(make_icon main.cpp)
 target_link_libraries(make_icon PRIVATE Qt6::Svg Qt6::Gui Qt6::Core)
 
-# Renders assets/phoenix.svg to assets/icons/*.png and assets/phoenix.ico.
+# Renders assets/phoenix-source.png (or --png <file>, else assets/phoenix.svg)
+# to assets/icons/*.png and assets/phoenix.ico.
 add_custom_target(icon ALL
     COMMAND make_icon "$<TARGET_FILE_DIR:make_icon>"
     COMMENT "Generating Phoenix icon set"

@@ -1,11 +1,18 @@
-// Dev tool: renders assets/phoenix.svg (or a raster source with --png) to a
-// set of PNG files and a multi-size .ico for the executable.
+// Dev tool: renders the Phoenix artwork to a set of PNG files and a
+// multi-size .ico for the executable.
+//
+// Source priority (the first that exists wins):
+//   1. --png <source.png>   explicit raster source
+//   2. assets/phoenix-source.png   the committed master artwork
+//   3. assets/phoenix.svg          vector fallback
+//
 // Run after changing the artwork:
 //   cmake -S tools/make_icon -B tools/make_icon/build -G Ninja "-DCMAKE_PREFIX_PATH=C:/msys64/mingw64"
 //   cmake --build tools/make_icon/build
 // Usage: make_icon.exe <build-dir> [--png <source.png>]   (writes into <repo>/assets)
 
 #include <QBuffer>
+#include <QFile>
 #include <QGuiApplication>
 #include <QImage>
 #include <QPainter>
@@ -78,6 +85,14 @@ int main(int argc, char** argv) {
         // argv[1] is the build directory: tools/make_icon/build
         base = std::string(argv[1]) + "/../../.."; // repo root
         svgPath = base + "/assets/phoenix.svg";
+    }
+    // Without an explicit --png, prefer the committed master raster artwork:
+    // the shipped icon set is generated from it, so defaulting to the SVG
+    // would silently change the app icon. The SVG stays a fallback.
+    if (pngSource.empty()) {
+        const std::string master = base + "/assets/phoenix-source.png";
+        if (QFile::exists(QString::fromStdString(master)))
+            pngSource = master;
     }
 
     QImage pngSrc;

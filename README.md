@@ -89,7 +89,8 @@ Phoenix/
 ├── CMakeLists.txt
 ├── Phoenix.qrc               # icon PNGs + theme.qss bundled into the binary
 ├── assets/
-│   ├── phoenix.svg           # source artwork (edit this, regenerate the rest)
+│   ├── phoenix-source.png    # master artwork (edit this, regenerate the rest)
+│   ├── phoenix.svg           # vector fallback for the icon generator
 │   ├── phoenix.ico           # embedded into Phoenix.exe (src/app.rc.in)
 │   └── icons/                # phoenix-16..256.png (multi-size icon set)
 ├── src/
@@ -127,7 +128,10 @@ Phoenix/
 
 ## 🐦‍🔥 Changing the icon
 
-1. Edit `assets/phoenix.svg` (the flame-bird artwork).
+The master artwork is `assets/phoenix-source.png` (a square PNG, 1024×1024+).
+The generator prefers it automatically; `assets/phoenix.svg` is only a fallback.
+
+1. Replace `assets/phoenix-source.png` with your new square image.
 2. Regenerate the icon set from MSYS2:
 
    ```powershell
@@ -137,7 +141,9 @@ Phoenix/
 
 3. Rebuild Phoenix: the window/taskbar icon comes from the PNGs via `Phoenix.qrc`, and the `.exe` file icon from `phoenix.ico` via `src/app.rc.in`. Done.
 
-> Needs `mingw-w64-x86_64-qt6-svg` (already installed). To use your *own* image instead of the SVG, drop a square PNG over `assets/icons/phoenix-256.png` and re-add the other sizes.
+> Needs `mingw-w64-x86_64-qt6-svg` (already installed) — only used for the SVG
+> fallback. To render from a different file explicitly, pass
+> `make_icon.exe <build-dir> --png C:\path\to\source.png`.
 
 ## 🧭 Platform & design decisions
 
