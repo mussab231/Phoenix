@@ -1,8 +1,9 @@
-// Dev tool: renders assets/phoenix.svg to a set of PNG files and a multi-size
-// .ico for the executable. Run after changing the SVG:
+// Dev tool: renders assets/phoenix.svg (or a raster source with --png) to a
+// set of PNG files and a multi-size .ico for the executable.
+// Run after changing the artwork:
 //   cmake -S tools/make_icon -B tools/make_icon/build -G Ninja "-DCMAKE_PREFIX_PATH=C:/msys64/mingw64"
 //   cmake --build tools/make_icon/build
-// Usage: make_icon.exe <build-dir>   (writes into <repo>/assets)
+// Usage: make_icon.exe <build-dir> [--png <source.png>]   (writes into <repo>/assets)
 
 #include <QBuffer>
 #include <QGuiApplication>
@@ -66,16 +67,35 @@ int main(int argc, char** argv) {
     // Default run: from tools/make_icon/build -> repo root is ../../../.
     std::string svgPath = "../../../assets/phoenix.svg";
     std::string base = "../..";
+    std::string pngSource; // optional raster source instead of the SVG
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--png") {
+            pngSource = argv[i + 1];
+            break;
+        }
+    }
     if (argc > 1 && argv[1][0] != '\0') {
         // argv[1] is the build directory: tools/make_icon/build
         base = std::string(argv[1]) + "/../../.."; // repo root
         svgPath = base + "/assets/phoenix.svg";
     }
 
-    QSvgRenderer svg(QString::fromStdString(svgPath));
-    if (!svg.isValid()) {
-        std::fprintf(stderr, "Cannot load %s\n", svgPath.c_str());
-        return 1;
+    QImage pngSrc;
+    if (!pngSource.empty()) {
+        pngSrc = QImage(QString::fromLocal8Bit(pngSource.c_str()));
+        if (pngSrc.isNull()) {
+            std::fprintf(stderr, "Cannot load %s\n", pngSource.c_str());
+            return 1;
+        }
+    }
+
+    QSvgRenderer svg;
+    if (pngSrc.isNull()) {
+        svg.load(QString::fromStdString(svgPath));
+        if (!svg.isValid()) {
+            std::fprintf(stderr, "Cannot load %s\n", svgPath.c_str());
+            return 1;
+        }
     }
 
     const std::vector<int> sizes = {16, 24, 32, 48, 64, 128, 256};
@@ -83,7 +103,15 @@ int main(int argc, char** argv) {
     pngs.reserve(sizes.size());
 
     for (size_t i = 0; i < sizes.size(); ++i) {
-        QImage img = render(svg, sizes[i]);
+        QImage img;
+        if (!pngSrc.isNull()) {
+            img = pngSrc
+                      .scaled(sizes[i], sizes[i], Qt::IgnoreAspectRatio,
+                              Qt::SmoothTransformation)
+                      .convertToFormat(QImage::Format_ARGB32);
+        } else {
+            img = render(svg, sizes[i]);
+        }
         std::string pngPath =
             base + "/assets/icons/phoenix-" + std::to_string(sizes[i]) + ".png";
         if (!img.save(QString::fromStdString(pngPath), "PNG")) {
