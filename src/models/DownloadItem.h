@@ -8,6 +8,10 @@
 // One entry in the download queue. Idle = waiting for a free slot.
 struct DownloadItem {
     int id = 0;
+    // Stable cross-session identity: the int id is only unique within one
+    // process, so a persisted-and-restored item or a native-host request that
+    // survives a restart also carries this. Empty only for legacy items.
+    std::string uuid;
     std::string url;
     std::string outputPath;
     int segments = 8;
