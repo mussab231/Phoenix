@@ -29,8 +29,12 @@ public:
 
 private slots:
     void onBrowse();
+    // Re-derives the output name when the URL changes and the current name is
+    // still the placeholder (nothing for the user to overwrite).
+    void onUrlChanged();
 
 private:
+    void probeFilename();
     QLineEdit* m_urlEdit = nullptr;
     QLineEdit* m_pathEdit = nullptr;
     QLineEdit* m_hashEdit = nullptr;
@@ -39,4 +43,10 @@ private:
     QCheckBox* m_scheduleCheck = nullptr;
     QDateTimeEdit* m_scheduleEdit = nullptr;
     QString m_defaultDir;
+    // True once the user typed the output path by hand: probeFilename() must
+    // not overwrite a deliberate choice.
+    bool m_userEditedPath = false;
+    // True when the current name came from a probe: a later URL change may
+    // still refine it.
+    bool m_nameFromProbe = false;
 };

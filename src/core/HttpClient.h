@@ -30,6 +30,18 @@ public:
     // Probes Range support with a 1-byte request (expects HTTP 206).
     static bool supportsRanges(const std::string& url);
 
+    // Best-effort output filename for a URL. Resolution order:
+    //   1. an explicit suggested name, if it already carries an extension;
+    //   2. the server's Content-Disposition header;
+    //   3. the last path segment of the URL;
+    //   4. a Content-Type-derived extension when the above give a name with
+    //      no usable extension (e.g. https://cdn.example.com/d?id=1234),
+    //      so the file lands with a type Windows can open instead of a
+    //      nameless .bin.
+    // Never throws: any network failure leaves the URL-derived name alone.
+    static std::string guessFilename(const std::string& url,
+                                     const std::string& suggestedName = {});
+
     // Parallel segmented download. Splits the file into numSegments ranges
     // (clamped to 1..16), preallocates the output file, and downloads every
     // segment on its own thread/connection. Falls back to a single

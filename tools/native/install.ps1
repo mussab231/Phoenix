@@ -1,6 +1,9 @@
 param(
     [string]$PhoenixExe,
-    [string]$ExtensionId,
+    # The extension ships with a fixed public key, so its ID is stable across
+    # machines and browser profiles. Override only if you forked the extension
+    # and changed the key.
+    [string]$ExtensionId = "lmjocnjhfnloppdn",
     [ValidateSet("Chrome", "Edge")]
     [string[]]$Browsers = @("Chrome", "Edge")
 )
@@ -26,13 +29,12 @@ if (-not $PhoenixExe -or -not (Test-Path -LiteralPath $PhoenixExe)) {
 $PhoenixExe = (Resolve-Path -LiteralPath $PhoenixExe).Path
 Write-Host "Host executable: $PhoenixExe"
 
-# The Chromium native-messaging manifest pins the extension by ID. An unpacked
-# MV3 extension gets a stable ID only if its manifest.json carries a "key"; if
-# none is set, read the ID from chrome://extensions and pass it here.
+# The Chromium native-messaging manifest pins the extension by ID. The
+# bundled extension carries a fixed key, so the default ID is stable and no
+# prompt is needed; pass -ExtensionId only for a forked build.
 if (-not $ExtensionId) {
-    $ExtensionId = Read-Host "Extension ID (from chrome://extensions, or 'skip' to leave the placeholder)"
+    $ExtensionId = "lmjocnjhfnloppdn"
 }
-if ($ExtensionId -eq "skip") { $ExtensionId = "YOUR_EXTENSION_ID_HERE" }
 
 # Chromium insists the ID end with '/'. Normalise a bare id like 'aabbcc...'.
 if ($ExtensionId -notmatch "/$") { $ExtensionId = "$ExtensionId/" }
@@ -46,7 +48,11 @@ $chromiumManifest = [ordered]@{
     allowed_origins  = @("chrome-extension://$ExtensionId")
 }
 $manifestPath = Join-Path $ManifestDir "manifest.chrome.json"
-$chromiumManifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+# Chromium requires strict ASCII/UTF-8 with NO byte-order mark: a BOM makes the
+# manifest unreadable and the host silently never starts. .NET's UTF8 no-BOM
+# encoder avoids that.
+$json = $chromiumManifest | ConvertTo-Json -Depth 4
+[System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Wrote $manifestPath"
 
 $hostKeys = @()
@@ -65,9 +71,5 @@ foreach ($key in $hostKeys) {
 Write-Host ""
 Write-Host "Done. Next steps:"
 Write-Host "  1. Load the extension from tools\native\extension (chrome://extensions -> Load unpacked)."
-if ($ExtensionId -eq "YOUR_EXTENSION_ID_HERE/") {
-    Write-Host "  2. Re-run this script with -ExtensionId <id> after loading, so the host"
-    Write-Host "     manifest allows your extension."
-} else {
-    Write-Host "  2. Restart the browser, then right-click a link -> Send link to Phoenix."
-}
+Write-Host "  2. Restart the browser, then right-click a link -> Send link to Phoenix,"
+Write-Host "     or right-click the toolbar icon -> Catch downloads automatically."

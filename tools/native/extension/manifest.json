@@ -15,5 +15,6 @@
   },
   "action": {
     "default_title": "Send this page's URL to Phoenix"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkqquOiUX906KIUBYd8oqqufZiX3jvCpg09+bFrrVf4Uc1U6PTtxld2gqthW3xWHYj20lRUnyUodlg6tRd9BJCCsg05RVjpg26ajYts1PXST/8uP4KcGEeQjcmV2lUmCd/Ad17KG3HNGsX281zUhXlvZmT4fRZfyg4cBa+/O7pEeyruYn2XIyf3FDGFjk5lJrnl4eVFXyTGK4osloZcT8gilZlx/t5x0RQdClOD07vIvQ2Bu1JnWOU9bNmLANIFi5sahCRrB7J9czwqs0mmzFfCF5Fr4WQhCctIyQpJRyXF+K8AY89OEQrzuaF1YdioN3qTZ8P28QeEFwRdkef1qRAwIDAQAB"
 }

@@ -148,6 +148,13 @@ int main(int argc, char** argv) {
             return ProtocolRegistrar::registerHandler() ? 0 : 1;
         if (arg == "--unregister")
             return ProtocolRegistrar::unregisterHandler() ? 0 : 1;
+        // Diagnostic: shows the name a download from this URL would land as
+        // (Content-Disposition, URL path, or a Content-Type-derived ext).
+        if (arg == "--guess" && i + 1 < argc) {
+            const std::string url = argv[++i];
+            std::printf("%s\n", HttpClient::guessFilename(url).c_str());
+            return 0;
+        }
     }
 
     // OS/browser launch with a phoenix:// link: decode it. If another Phoenix

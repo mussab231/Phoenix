@@ -48,6 +48,21 @@ foreach ($rt in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll"
     Copy-Item $src (Join-Path $DistDir $rt)
 }
 
+# Bundle the browser extension + its host-registration script so a single
+# install gives the user the Chrome/Edge integration. The extension carries a
+# fixed key, so its ID is stable and the host registers unattended.
+$ExtSrc = Join-Path $Root "tools\native\extension"
+$ExtDst = Join-Path $DistDir "browser-extension"
+if (Test-Path $ExtSrc) {
+    New-Item -ItemType Directory -Force -Path $ExtDst | Out-Null
+    Copy-Item (Join-Path $ExtSrc "*") $ExtDst -Recurse -Force
+    Copy-Item (Join-Path $Root "tools\native\install.ps1") (Join-Path $DistDir "install.ps1") -Force
+    Copy-Item (Join-Path $Root "tools\native\uninstall-host.ps1") (Join-Path $DistDir "uninstall-host.ps1") -Force
+    Write-Output "Bundled browser extension: $ExtDst"
+} else {
+    Write-Warning "browser extension not found at $ExtSrc (skipped)"
+}
+
 # 3) Portable zip.
 New-Item -ItemType Directory -Force -Path (Split-Path $ZipPath) | Out-Null
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }

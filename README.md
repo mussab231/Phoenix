@@ -36,16 +36,18 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
 | **Native Messaging Host + browser extension** (`tools/native/`): right-click any link -> "Send link to Phoenix"; hands off to the running window or queues itself | ✅ |
 | **Automatic download catching**: opt-in from the extension menu — a normal click on a download link goes straight to Phoenix (no context menu needed) | ✅ |
+| **One-step install**: the installer bundles the extension and registers the native host (stable extension ID from a fixed public key), leaving only the "Load unpacked" step to the user | ✅ |
 | **Arabic UI + RTL**: complete Arabic interface with right-to-left layout; language switch applies live (no restart), persists across runs | ✅ |
 | **HTTP/2**: negotiated automatically on Windows 10+ (transparent HTTP/1.1 fallback) | ✅ |
 | **Start with Windows** & **Start minimized to tray** options (Settings → boot into the tray, `HKCU\...\Run` autostart) | ✅ |
 | **Add dialog pre-fill**: a copied download URL is detected and both URL + target name are filled in automatically | ✅ |
+| **Server-derived filenames**: `Content-Disposition` (incl. RFC 5987 UTF-8) is honoured, then the URL path, then a `Content-Type`-derived extension — so `https://x.com/d?id=1` lands as `download.mp4`, not a nameless `.bin` (`--guess <url>` previews the result) | ✅ |
 | **SHA-256 verification**: optional hash field in Add dialog; the finished file is checked automatically ("Checksum OK" / "Checksum FAILED" in the row) | ✅ |
 | **Retry failed downloads**: a failed item can be re-queued with one click (toolbar Retry) | ✅ |
-| **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
+| **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar, system file-type icons per row, and a "37.8 MB left" readout on the progress bar | ✅ |
 | Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-1.0.0-portable.zip`) + Inno Setup script | ✅ |
 | Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`, `-checksum`) | ✅ |
-| **Catch2 unit tests** (`tests/`, 46 cases / 157 assertions, pure-logic modules) | ✅ |
+| **Catch2 unit tests** (`tests/`, 53 cases / 196 assertions, pure-logic modules) | ✅ |
 
 ## 🛠️ Requirements
 

@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -97,7 +98,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_table->setHorizontalHeaderLabels(
         {I18n::t("File"), I18n::t("Size"), I18n::t("Progress"),
          I18n::t("Speed"), I18n::t("Status")});
+    // The File column absorbs slack; every other column is sized to its
+    // content so "1.2 GB / 4.7 GB" and "12.3 MB/s" are never cut short.
     m_table->horizontalHeader()->setSectionResizeMode(kColFile, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(kColSize, QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(kColProgress, QHeaderView::Fixed);
+    m_table->horizontalHeader()->resizeSection(kColProgress, 190);
+    m_table->horizontalHeader()->setSectionResizeMode(kColSpeed, QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(kColStatus, QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setStretchLastSection(false);
+    // System file-type icons in the File column make a video/installer/archive
+    // recognisable at a glance instead of "unknown file".
+    m_table->setIconSize(QSize(20, 20));
+    m_table->verticalHeader()->setDefaultSectionSize(26);
     m_table->setSelectionBehavior(QTableWidget::SelectRows);
     m_table->setEditTriggers(QTableWidget::NoEditTriggers);
     layout->addWidget(m_table);
@@ -479,8 +492,13 @@ void MainWindow::updateRow(int id) {
     if (!found)
         return;
 
-    m_table->item(row, kColFile)
-        ->setText(baseName(QString::fromStdString(data.outputPath)));
+    const QString fileName = baseName(QString::fromStdString(data.outputPath));
+    m_table->item(row, kColFile)->setText(fileName);
+    // System icon for the extension: a video, an installer, an archive all get
+    // their real look, so an extensionless download is visible as unknown.
+    static QFileIconProvider iconProvider;
+    m_table->item(row, kColFile)->setIcon(iconProvider.icon(QFileInfo(fileName)));
+
     if (data.totalBytes > 0) {
         const QString total = formatSize(data.totalBytes);
         if (data.state == DownloadState::Running ||
@@ -498,7 +516,15 @@ void MainWindow::updateRow(int id) {
         if (data.totalBytes > 0) {
             bar->setRange(0, 100);
             bar->setValue(static_cast<int>(data.receivedBytes * 100 / data.totalBytes));
-            bar->setFormat(QStringLiteral("%p%"));
+            // Percent plus what is still to fetch, so "how much is left" does
+            // not need a second look at the Size column.
+            if (data.state == DownloadState::Running &&
+                data.totalBytes > data.receivedBytes) {
+                bar->setFormat(QStringLiteral("%p% · %1 left").arg(
+                    formatSize(data.totalBytes - data.receivedBytes)));
+            } else {
+                bar->setFormat(QStringLiteral("%p%"));
+            }
         } else {
             bar->setRange(0, 0); // unknown size: busy indicator
         }

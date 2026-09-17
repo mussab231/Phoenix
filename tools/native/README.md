@@ -20,27 +20,42 @@ The host process exits when the browser closes the channel.
 
 ## Install (Chrome / Edge)
 
-1. Build Phoenix: `cmake --build build` (creates `build\Phoenix.exe`) and register
-   the `phoenix://` protocol once (`Phoenix.exe --register`).
+### From the installer (recommended)
+
+The Windows installer bundles the extension and registers the native host for
+you: just leave **"Install browser integration"** checked. After it finishes,
+load the extension once:
+
+1. `chrome://extensions` -> **Developer mode** -> **Load unpacked** ->
+   select the program's `browser-extension` folder (the installer's last
+   step can open it for you).
+2. Restart the browser, then either:
+   - right-click any link -> **Send link to Phoenix**, or
+   - right-click the extension's toolbar icon -> **Catch downloads
+     automatically** so a normal click on a download link is intercepted.
+
+The extension ships with a fixed public key, so its ID
+(`lmjocnjhfnloppdn`) is stable across machines — no ID prompt, and the host
+manifest is registered unattended.
+
+### From source
+
+1. Build Phoenix: `cmake --build build` (creates `build\Phoenix.exe`) and
+   register the `phoenix://` protocol once (`Phoenix.exe --register`).
 2. Load the extension in the browser:
    - `chrome://extensions` -> **Developer mode** -> **Load unpacked** ->
      select `tools\native\extension`.
-   - Copy the extension's ID shown on that page.
 3. Register the host (needs no admin, writes HKCU only):
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File tools\native\install.ps1 -ExtensionId <your-extension-id>
+   powershell -ExecutionPolicy Bypass -File tools/native/install.ps1
    ```
 
    Pass `-PhoenixExe C:\path\to\Phoenix.exe` if it wasn't found automatically,
-   and/or `-Browsers Edge` to register for Edge alone.
+   `-ExtensionId <id>` for a forked build, and/or `-Browsers Edge` to register
+   for Edge alone.
 
-4. Restart the browser, then either:
-   - right-click any link -> **Send link to Phoenix**, or
-   - right-click the extension's toolbar icon -> **Catch downloads
-     automatically**. Once enabled, a normal click on a download link is
-     intercepted and handed to Phoenix instead of the browser. The toggle is
-     off by default and remembered per browser profile.
+4. Restart the browser, then right-click any link -> **Send link to Phoenix**.
 
 Uninstall:
 

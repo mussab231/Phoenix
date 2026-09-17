@@ -1,5 +1,6 @@
 #include "gui/AddDialog.h"
 
+#include "core/HttpClient.h"
 #include "core/UrlMatcher.h"
 #include "gui/I18n.h"
 
@@ -13,12 +14,15 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLineEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSpinBox>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <thread>
 
 namespace {
 
@@ -118,6 +122,10 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
     layout->addWidget(buttons);
 
     connect(browseBtn, &QPushButton::clicked, this, &AddDialog::onBrowse);
+    // Re-derive the output name whenever the URL is finished, unless the user
+    // has already typed one by hand.
+    connect(m_urlEdit, &QLineEdit::editingFinished, this, &AddDialog::onUrlChanged);
+    connect(m_pathEdit, &QLineEdit::textEdited, this, [this] { m_userEditedPath = true; });
     connect(buttons, &QDialogButtonBox::accepted, this, [this] {
         if (!m_urlEdit->text().trimmed().isEmpty() &&
             !m_pathEdit->text().trimmed().isEmpty())
@@ -126,7 +134,8 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     // Convenience: a copy of a download URL typically sits in the clipboard,
-    // so pre-fill both the URL and the target name from it.
+    // so pre-fill the URL and a first-guess target name from it. The name is
+    // refined shortly after by probeFilename() (Content-Disposition / type).
     const QString clipText = QGuiApplication::clipboard()->text();
     const std::string first = UrlMatcher::extractFirstUrl(clipText.toStdString());
     if (!first.empty()) {
@@ -137,9 +146,56 @@ AddDialog::AddDialog(QWidget* parent, int defaultSegments,
             name = QStringLiteral("download.bin");
         if (!m_defaultDir.isEmpty())
             m_pathEdit->setText(QDir(m_defaultDir).filePath(name));
+        probeFilename();
     }
 
     m_urlEdit->setFocus();
+}
+
+void AddDialog::onUrlChanged() {
+    probeFilename();
+}
+
+void AddDialog::probeFilename() {
+    const std::string url = m_urlEdit->text().trimmed().toStdString();
+    if (url.empty())
+        return;
+    // Never clobber a name the user picked by hand.
+    const QString current = m_pathEdit->text().trimmed();
+    if (!current.isEmpty() && m_userEditedPath)
+        return;
+
+    // The refinement only matters when the URL's own path gives no usable
+    // name (e.g. https://cdn.example.com/d?id=1234); a typed URL is left as is.
+    const QUrl q(QString::fromStdString(url));
+    if (!q.fileName().isEmpty() && QFileInfo(q.fileName()).suffix().isEmpty() == false)
+        return;
+
+    // The probe blocks on the network, so it runs off the UI thread; the name
+    // is applied back on the dialog thread when it lands.
+    QPointer<AddDialog> guard(this);
+    const QString dir = m_defaultDir;
+    std::thread([guard, url, dir]() {
+        std::string guessed;
+        try {
+            guessed = HttpClient::guessFilename(url);
+        } catch (...) {
+            return;
+        }
+        if (guessed.empty())
+            return;
+        QMetaObject::invokeMethod(
+            guard.data(),
+            [guard, name = QString::fromStdString(guessed), dir]() {
+                if (!guard)
+                    return;
+                const QString path =
+                    dir.isEmpty() ? name : QDir(dir).filePath(name);
+                guard->m_pathEdit->setText(path);
+                guard->m_nameFromProbe = true;
+            },
+            Qt::QueuedConnection);
+    }).detach();
 }
 
 QString AddDialog::url() const {

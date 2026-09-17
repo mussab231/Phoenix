@@ -1,6 +1,7 @@
 #include "core/NativeHost.h"
 
 #include "core/DownloadQueue.h"
+#include "core/HttpClient.h"
 #include "models/DownloadItem.h"
 
 #include <QDir>
@@ -177,8 +178,13 @@ QJsonObject NativeHost::handleRequest(const QJsonObject& request,
                      QStringLiteral("no active download queue")}};
         const QString fileName =
             request.value(QStringLiteral("fileName")).toString();
+        // The browser only knows the name when the server sent a usable
+        // Content-Disposition; for a bare URL the host is probed for a
+        // type-derived extension so the file is not saved as a nameless .bin.
+        const std::string resolved = HttpClient::guessFilename(
+            url.toStdString(), fileName.toStdString());
         const QString target =
-            targetPathFor(QUrl(url), fileName, defaultDir);
+            targetPathFor(QUrl(url), QString::fromStdString(resolved), defaultDir);
         const int id = queue->addDownload(url.toStdString(), target.toStdString());
         return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), id}};
     }

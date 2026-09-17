@@ -26,6 +26,7 @@ if(PHOENIX_RELEASE)
     add_executable(Phoenix WIN32
         src/main.cpp
         src/core/HttpClient.cpp
+        src/core/MimeMap.cpp
         src/core/ResumeStore.cpp
         src/core/DownloadEngine.cpp
         src/core/DownloadQueue.cpp
@@ -54,6 +55,7 @@ else()
     add_executable(Phoenix
         src/main.cpp
         src/core/HttpClient.cpp
+        src/core/MimeMap.cpp
         src/core/ResumeStore.cpp
         src/core/DownloadEngine.cpp
         src/core/DownloadQueue.cpp

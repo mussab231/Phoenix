@@ -27,7 +27,9 @@ add_executable(phoenix_unit_tests EXCLUDE_FROM_ALL
     test_uuid.cpp
     test_resumestore.cpp
     test_sessionstore.cpp
+    test_mimemap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/UrlCodec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/MimeMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/UrlMatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/Checksum.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/RateLimiter.cpp

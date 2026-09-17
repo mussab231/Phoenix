@@ -1,6 +1,7 @@
 #include "core/HttpClient.h"
 
 #include "core/DownloadError.h"
+#include "core/MimeMap.h"
 #include "core/RateLimiter.h"
 #include "core/ResumeStore.h"
 
@@ -12,6 +13,7 @@
 #include <exception>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -434,6 +436,27 @@ std::int64_t HttpClient::getFileSize(const std::string& url) {
     return rt;
 }
 
+// Reads one response header as UTF-8; empty string when absent.
+namespace {
+// The length probe passes WINHTTP_NO_OUTPUT_BUFFER, which always fails with
+// ERROR_INSUFFICIENT_BUFFER and reports the needed size: only an empty size
+// means the header is genuinely missing, the boolean return must be ignored.
+std::string readHeaderUtf8(HINTERNET hRequest, DWORD which) {
+    DWORD len = 0;
+    WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
+                        WINHTTP_NO_OUTPUT_BUFFER, &len, WINHTTP_NO_HEADER_INDEX);
+    if (len == 0)
+        return {};
+    std::wstring w(static_cast<size_t>(len / sizeof(wchar_t)), L'\0');
+    if (!WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
+                             w.data(), &len, WINHTTP_NO_HEADER_INDEX))
+        return {};
+    if (!w.empty() && w.back() == L'\0')
+        w.pop_back();
+    return toUtf8(w);
+}
+} // namespace
+
 void HttpClient::getResourceIdentity(const std::string& url,
                                     std::string& etag,
                                     std::string& lastModified) {
@@ -448,24 +471,11 @@ void HttpClient::getResourceIdentity(const std::string& url,
         return; // identity unknown, not fatal: fall back to URL+total check
     }
 
-    // WinHTTP gives headers as wide strings; convert both back to UTF-8.
-    auto readHeader = [&](DWORD which) -> std::string {
-        DWORD len = 0;
-        if (!WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
-                                 WINHTTP_NO_OUTPUT_BUFFER, &len,
-                                 WINHTTP_NO_HEADER_INDEX) ||
-            len == 0)
-            return {};
-        std::wstring w(static_cast<size_t>(len / sizeof(wchar_t)), L'\0');
-        if (!WinHttpQueryHeaders(hRequest, which, WINHTTP_HEADER_NAME_BY_INDEX,
-                                 w.data(), &len, WINHTTP_NO_HEADER_INDEX))
-            return {};
-        if (!w.empty() && w.back() == L'\0')
-            w.pop_back();
-        return toUtf8(w);
-    };
-    etag = readHeader(WINHTTP_QUERY_ETAG);
-    lastModified = readHeader(WINHTTP_QUERY_LAST_MODIFIED);
+    // WinHTTP gives headers as wide strings; the length probe always fails
+    // with ERROR_INSUFFICIENT_BUFFER, so readHeaderUtf8 (which ignores that
+    // first return value) is what actually yields the values.
+    etag = readHeaderUtf8(hRequest, WINHTTP_QUERY_ETAG);
+    lastModified = readHeaderUtf8(hRequest, WINHTTP_QUERY_LAST_MODIFIED);
 }
 
 bool HttpClient::supportsRanges(const std::string& url) {
@@ -480,6 +490,53 @@ bool HttpClient::supportsRanges(const std::string& url) {
         });
 
     return queryStatus(hRequest) == 206;
+}
+
+std::string HttpClient::guessFilename(const std::string& url,
+                                      const std::string& suggestedName) {
+    using namespace MimeMap;
+
+    // 1. An explicit, already-typed suggestion (the browser knows the real
+    //    name from its own Content-Disposition handling) always wins.
+    if (!suggestedName.empty() && hasExtension(suggestedName))
+        return suggestedName;
+
+    std::string name = suggestedName;
+    std::string mime;
+
+    // 2/4. Probe the server for Content-Disposition and Content-Type. Any
+    // network failure is non-fatal: we fall back to the URL-derived name.
+    try {
+        UrlParts parts = crackUrl(url);
+        Session session(parts);
+        HINTERNET hRequest = session.secureRequest(parts, L"HEAD");
+        const std::string disposition =
+            readHeaderUtf8(hRequest, WINHTTP_QUERY_CONTENT_DISPOSITION);
+        if (!disposition.empty()) {
+            std::string fn = parseContentDispositionFilename(disposition);
+            if (!fn.empty())
+                name = fn;
+        }
+        mime = readHeaderUtf8(hRequest, WINHTTP_QUERY_CONTENT_TYPE);
+    } catch (...) {
+        // HEAD rejected or timed out: keep what we have.
+    }
+
+    // 3. URL's last path segment.
+    if (name.empty())
+        name = urlFilename(url);
+
+    // 4. Type-derived extension when nothing above gave a typed name. An
+    // empty name (root URL) still gets a real file name, not a bare ".html".
+    if (!hasExtension(name) && !mime.empty()) {
+        const std::string ext = mimeToExtension(mime);
+        if (!ext.empty())
+            name = name.empty() ? ("download." + ext) : (name + "." + ext);
+    }
+
+    if (name.empty())
+        name = "download.bin";
+    return name;
 }
 
 void HttpClient::download(const std::string& url, const std::string& outputPath,
