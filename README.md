@@ -35,6 +35,7 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **Persistent settings**: default folder, connections, max speed, concurrency, when-done action, clipboard watch and window position are saved and restored | ✅ |
 | **Settings dialog**: edit saved preferences from the toolbar or tray menu | ✅ |
 | **Native Messaging Host + browser extension** (`tools/native/`): right-click any link -> "Send link to Phoenix"; hands off to the running window or queues itself | ✅ |
+| **Automatic download catching**: opt-in from the extension menu — a normal click on a download link goes straight to Phoenix (no context menu needed) | ✅ |
 | **Arabic UI + RTL**: complete Arabic interface with right-to-left layout; language switch applies live (no restart), persists across runs | ✅ |
 | **HTTP/2**: negotiated automatically on Windows 10+ (transparent HTTP/1.1 fallback) | ✅ |
 | **Start with Windows** & **Start minimized to tray** options (Settings → boot into the tray, `HKCU\...\Run` autostart) | ✅ |

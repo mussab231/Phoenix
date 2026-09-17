@@ -35,7 +35,12 @@ The host process exits when the browser closes the channel.
    Pass `-PhoenixExe C:\path\to\Phoenix.exe` if it wasn't found automatically,
    and/or `-Browsers Edge` to register for Edge alone.
 
-4. Restart the browser, then right-click any link -> **Send link to Phoenix**.
+4. Restart the browser, then either:
+   - right-click any link -> **Send link to Phoenix**, or
+   - right-click the extension's toolbar icon -> **Catch downloads
+     automatically**. Once enabled, a normal click on a download link is
+     intercepted and handed to Phoenix instead of the browser. The toggle is
+     off by default and remembered per browser profile.
 
 Uninstall:
 
