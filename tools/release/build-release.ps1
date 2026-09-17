@@ -12,7 +12,7 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $QtBin = "C:\msys64\mingw64\bin"
 $Ninja = Join-Path $QtBin "ninja.exe"
 $Windeployqt = Join-Path $QtBin "windeployqt.exe"
-$Version = "0.9.0"
+$Version = "1.0.0"
 
 $BuildDir = Join-Path $Root "build-release"
 $DistDir = Join-Path $Root "dist\Phoenix"

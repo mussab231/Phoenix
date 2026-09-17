@@ -11,7 +11,7 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 
 ---
 
-## ✨ Features (v0.9)
+## ✨ Features (v1.0)
 
 | Feature | Status |
 |---------|--------|
@@ -42,7 +42,7 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **SHA-256 verification**: optional hash field in Add dialog; the finished file is checked automatically ("Checksum OK" / "Checksum FAILED" in the row) | ✅ |
 | **Retry failed downloads**: a failed item can be re-queued with one click (toolbar Retry) | ✅ |
 | **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
-| Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-0.9.0-portable.zip`) + Inno Setup script | ✅ |
+| Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-1.0.0-portable.zip`) + Inno Setup script | ✅ |
 | Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`, `-checksum`) | ✅ |
 | **Catch2 unit tests** (`tests/`, 46 cases / 157 assertions, pure-logic modules) | ✅ |
 

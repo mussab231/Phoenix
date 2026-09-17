@@ -4,7 +4,7 @@
 ; (HKCU, no admin), so the installer does not need elevated per-machine keys.
 
 #define MyAppName "Phoenix Download Manager"
-#define MyAppVersion "0.9.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Phoenix"
 #define MyAppExeName "Phoenix.exe"
 

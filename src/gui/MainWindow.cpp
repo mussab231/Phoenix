@@ -44,7 +44,7 @@ constexpr int kColStatus = 4;
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("Phoenix 0.9"));
+    setWindowTitle(QStringLiteral("Phoenix 1.0"));
     resize(820, 460);
 
     // Phoenix flame icon (multi-size so 16px taskbar and 256px details both crisp).
