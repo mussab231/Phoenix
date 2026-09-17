@@ -83,3 +83,16 @@ endif()
 target_include_directories(Phoenix PRIVATE src)
 target_compile_definitions(Phoenix PRIVATE PHOENIX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(Phoenix PRIVATE Qt6::Widgets Qt6::Network winhttp powrprof ws2_32)
+
+# Headless unit tests (Catch2). Opt out with -DPHOENIX_BUILD_TESTS=OFF when the
+# Catch2 package is unavailable; the main app builds either way.
+option(PHOENIX_BUILD_TESTS "Build the Catch2 unit-test suite" ON)
+if(PHOENIX_BUILD_TESTS)
+    find_package(Catch2 3 QUIET)
+    if(Catch2_FOUND)
+        add_subdirectory(tests)
+    else()
+        message(STATUS "Catch2 not found: skipping the unit-test suite "
+                       "(install mingw-w64-x86_64-catch or set CMAKE_PREFIX_PATH)")
+    endif()
+endif()

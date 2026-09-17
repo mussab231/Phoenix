@@ -43,7 +43,8 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 | **Retry failed downloads**: a failed item can be re-queued with one click (toolbar Retry) | ✅ |
 | **Queue polish**: completion tray notification, double-click row to open the file (or its folder), "Clear completed", written progress `12.3 MB / 45.0 MB` + % progress bar | ✅ |
 | Release packaging: `tools/release/build-release.ps1` → windowed exe + Qt runtime (`dist/Phoenix-0.9.0-portable.zip`) + Inno Setup script | ✅ |
-| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`) | ✅ |
+| Headless self-tests (`--self-test`, `-mt`, `-resume`, `-queue`, `-schedule`, `-sleep`, `-limit`, `-retry`, `-listen`, `-proto`, `-urlmatch`, `-settings`, `-native`, `-checksum`) | ✅ |
+| **Catch2 unit tests** (`tests/`, 46 cases / 157 assertions, pure-logic modules) | ✅ |
 
 ## 🛠️ Requirements
 
@@ -56,7 +57,9 @@ A fast **multi-segment download manager for Windows**, built with **C++17**, **W
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=C:/msys64/mingw64"
-cmake --build build
+cmake --build build          # builds Phoenix + the Catch2 unit-test suite
+./build/tests/phoenix_unit_tests.exe   # 46 unit cases
+./build/Phoenix.exe --self-test        # integration smoke test
 ```
 
 Or open the folder in VS Code (`F5` → *Run Phoenix (GUI)*) — tasks are preconfigured in `.vscode/`.
@@ -128,6 +131,7 @@ Phoenix/
 │   ├── make_icon/            # dev tool: SVG -> PNG sizes + .ico (needs qt6-svg)
 │   ├── native/               # browser integration: install.ps1 + MV3 extension
 │   └── release/              # build-release.ps1 (portable zip) + Phoenix.iss (Inno Setup)
+├── tests/                    # Catch2 unit tests for the pure-logic core modules
 └── .vscode/                  # build / run / debug tasks
 ```
 

@@ -30,6 +30,7 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-qt6-base
             mingw-w64-x86_64-qt6-svg
+            mingw-w64-x86_64-catch
 
       - name: Configure
         shell: msys2 {0}
@@ -38,6 +39,10 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: cmake --build build
+
+      - name: Unit tests (Catch2)
+        shell: msys2 {0}
+        run: ./build/tests/phoenix_unit_tests.exe
 
       - name: Offline self-tests (no network)
         shell: msys2 {0}
